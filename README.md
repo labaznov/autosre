@@ -12,8 +12,12 @@
 
 - [`docs/SPEC.md`](docs/SPEC.md) — что строим, словарь терминов, конвейер,
   критерии приёмки
+- [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) — устройство репозитория знаний,
+  форма скиллов и заметок
 - [`docs/adr/`](docs/adr/README.md) — почему устроено именно так
 - [`docs/PROCESS.md`](docs/PROCESS.md) — как ведётся проект
+- [`examples/knowledge/`](examples/knowledge/) — образец репозитория знаний
+  со стартовым набором скиллов
 
 Читать в этом порядке.
 
