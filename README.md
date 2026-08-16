@@ -17,6 +17,7 @@
 - [`docs/adr/`](docs/adr/README.md) — почему устроено именно так
 - [`docs/NAMES.md`](docs/NAMES.md) — термины в именах типов, таблиц и полей
 - [`docs/PLAN.md`](docs/PLAN.md) — состав и порядок первого среза
+- [`docs/TASKS.md`](docs/TASKS.md) — задачи с критериями готовности
 - [`docs/JOURNAL.md`](docs/JOURNAL.md) — журнал решений: вопросы и ответы по сессиям
 - [`docs/PROCESS.md`](docs/PROCESS.md) — как ведётся проект
 - [`examples/knowledge/`](examples/knowledge/) — образец репозитория знаний
