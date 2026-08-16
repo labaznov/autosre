@@ -15,6 +15,7 @@
 - [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) — устройство репозитория знаний,
   форма скиллов и заметок
 - [`docs/adr/`](docs/adr/README.md) — почему устроено именно так
+- [`docs/NAMES.md`](docs/NAMES.md) — термины в именах типов, таблиц и полей
 - [`docs/PLAN.md`](docs/PLAN.md) — состав и порядок первого среза
 - [`docs/JOURNAL.md`](docs/JOURNAL.md) — журнал решений: вопросы и ответы по сессиям
 - [`docs/PROCESS.md`](docs/PROCESS.md) — как ведётся проект
