@@ -1,0 +1,33 @@
+[package]
+name = "sre-app"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "sre_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sreagent"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+humantime-serde = "1"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt"] }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
