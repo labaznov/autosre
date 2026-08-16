@@ -15,11 +15,14 @@
 - [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) — устройство репозитория знаний,
   форма скиллов и заметок
 - [`docs/adr/`](docs/adr/README.md) — почему устроено именно так
+- [`docs/PLAN.md`](docs/PLAN.md) — состав и порядок первого среза
+- [`docs/JOURNAL.md`](docs/JOURNAL.md) — журнал решений: вопросы и ответы по сессиям
 - [`docs/PROCESS.md`](docs/PROCESS.md) — как ведётся проект
 - [`examples/knowledge/`](examples/knowledge/) — образец репозитория знаний
   со стартовым набором скиллов
 
-Читать в этом порядке.
+Читать в этом порядке. Тому, кто будет работать над проектом, — с
+[`AGENTS.md`](AGENTS.md).
 
 ## Коротко об устройстве
 
