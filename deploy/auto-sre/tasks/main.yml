@@ -1,0 +1,68 @@
+---
+- name: Проверить, что ключи заданы
+  ansible.builtin.assert:
+    that:
+      - sreagent_model_key | default('') | length > 0
+      - sreagent_session_key | default('') | length > 0
+      - sreagent_accounts | default([]) | length > 0
+    fail_msg: >-
+      Нужны sreagent_model_key, sreagent_session_key и хотя бы одна учётная
+      запись. Значений по умолчанию у ключей нет: без них агент не стартует.
+      Хеш пароля считается командой `sreagent hash <пароль>`.
+
+- name: Создать каталоги
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "10001"
+    mode: "0750"
+  loop:
+    - /opt/docker/sreagent
+    - /opt/docker/sreagent/src
+    - /opt/data/sreagent
+    - /opt/data/sreagent/knowledge
+
+- name: Забрать рабочую копию репозитория знаний
+  ansible.builtin.git:
+    repo: "{{ sreagent_knowledge_repo }}"
+    dest: /opt/data/sreagent/knowledge
+    version: "{{ sreagent_knowledge_branch | default('main') }}"
+  become_user: "#10001"
+  when: sreagent_knowledge_repo | default('') | length > 0
+
+- name: Скопировать исходники агента
+  ansible.posix.synchronize:
+    src: "{{ sreagent_source | default(playbook_dir + '/../sreagent') }}/"
+    dest: /opt/docker/sreagent/src/
+    delete: true
+    rsync_opts:
+      - "--exclude=target"
+      - "--exclude=.git"
+  notify: Пересобрать агента
+
+- name: Отрендерить настройки
+  ansible.builtin.template:
+    src: sreagent.toml.j2
+    dest: /opt/docker/sreagent/sreagent.toml
+    mode: "0640"
+  notify: Пересобрать агента
+
+- name: Отрендерить секреты
+  ansible.builtin.template:
+    src: env.j2
+    dest: /opt/docker/sreagent/.env
+    mode: "0600"
+  notify: Пересобрать агента
+
+- name: Отрендерить compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/docker/sreagent/docker-compose.yml
+    mode: "0640"
+  notify: Пересобрать агента
+
+- name: Поднять агента
+  community.docker.docker_compose_v2:
+    project_src: /opt/docker/sreagent
+    build: policy
+    state: present

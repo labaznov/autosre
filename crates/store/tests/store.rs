@@ -750,3 +750,52 @@ async fn keeps_why_the_incident_was_opened() {
         Some("такого раньше не было")
     );
 }
+
+#[tokio::test]
+async fn brings_the_schema_up_to_date() {
+    let directory = TempDir::new().expect("временный каталог не создан");
+    let path = directory.path().join("sre.db");
+    Store::open(&path).unwrap();
+    let version: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        usize::try_from(version).unwrap(),
+        sre_store::schema::STEPS.len()
+    );
+}
+
+#[tokio::test]
+async fn survives_a_lost_schema_version() {
+    let directory = TempDir::new().expect("временный каталог не создан");
+    let path = directory.path().join("sre.db");
+    Store::open(&path).unwrap();
+    // Так выглядит база, восстановленная из бэкапа или поправленная руками.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .pragma_update(None, "user_version", 0)
+        .unwrap();
+    assert!(Store::open(&path).is_ok());
+}
+
+#[tokio::test]
+async fn keeps_the_data_after_a_repeated_migration() {
+    let directory = TempDir::new().expect("временный каталог не создан");
+    let path = directory.path().join("sre.db");
+    let at = minute("2026-08-17T10:01:00Z");
+    Store::open(&path)
+        .unwrap()
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 7.0)],
+        )
+        .await
+        .unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .pragma_update(None, "user_version", 0)
+        .unwrap();
+    assert_eq!(Store::open(&path).unwrap().count("logs").await.unwrap(), 1);
+}

@@ -924,15 +924,35 @@ impl Rolled {
 }
 
 /// Применяет недостающие шаги схемы.
+///
+/// Шаг применяется по предложению, а уже сделанное пропускается: номер
+/// применённого шага можно потерять — восстановлением из бэкапа, ручной
+/// правкой, копией файла, — и агент обязан подняться, а не упасть с «столбец
+/// уже есть». Откат из [ADR-0023](../../../docs/adr/0023-deploy-with-downtime.md)
+/// без этого перестаёт быть откатом.
 fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let applied: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     let applied = usize::try_from(applied).unwrap_or(0);
     for (number, step) in schema::STEPS.iter().enumerate().skip(applied) {
-        connection.execute_batch(step)?;
+        for sentence in step.split(';').map(str::trim).filter(|it| !it.is_empty()) {
+            match connection.execute_batch(sentence) {
+                Ok(()) => {}
+                Err(failure) if done(&failure) => {
+                    tracing::debug!(step = number + 1, "часть шага схемы уже применена");
+                }
+                Err(failure) => return Err(failure.into()),
+            }
+        }
         connection.pragma_update(None, "user_version", number + 1)?;
         tracing::info!(step = number + 1, "схема базы обновлена");
     }
     Ok(())
+}
+
+/// Отказ, означающий «это уже сделано».
+fn done(failure: &rusqlite::Error) -> bool {
+    let text = failure.to_string();
+    text.contains("duplicate column name") || text.contains("already exists")
 }
 
 /// Инцидент из строки таблицы.
