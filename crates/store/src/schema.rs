@@ -64,4 +64,37 @@ pub const STEPS: &[&str] = &[
         ON deviations (source, stream, horizon, at);
     CREATE INDEX IF NOT EXISTS deviations_weight ON deviations (weight DESC);
     ",
+    // 3. Инциденты и связи между ними.
+    //
+    // Открытый инцидент на пару «сервис плюс сигнатура» должен быть один: на
+    // этом держится вся группировка. Уникальность частичная — закрытые пары
+    // могут повторяться, и новая беда с той же сигнатурой заведёт новую
+    // карточку, а не воскресит прошлогоднюю.
+    "
+    CREATE TABLE IF NOT EXISTS incidents (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        service   TEXT    NOT NULL,
+        signature TEXT    NOT NULL,
+        stream    TEXT    NOT NULL,
+        source    TEXT    NOT NULL,
+        state     TEXT    NOT NULL,
+        began     INTEGER NOT NULL,
+        last      INTEGER NOT NULL,
+        seen      INTEGER NOT NULL,
+        peak      REAL    NOT NULL,
+        weight    REAL    NOT NULL,
+        verdict   INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS incidents_open
+        ON incidents (service, signature) WHERE state = 'open';
+    CREATE INDEX IF NOT EXISTS incidents_last ON incidents (last DESC);
+
+    CREATE TABLE IF NOT EXISTS links (
+        incident INTEGER NOT NULL,
+        related  INTEGER NOT NULL,
+        PRIMARY KEY (incident, related)
+    ) WITHOUT ROWID;
+
+    ALTER TABLE deviations ADD COLUMN incident INTEGER;
+    ",
 ];

@@ -12,7 +12,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
-use sre_domain::{Bucket, Deviation, Hour, Minute, Span, Stream};
+use sre_domain::{
+    Bucket, Deviation, Hour, Incident, Minute, Service, Signature, Span, State, Stream,
+};
 use tokio::task;
 
 /// Предел ожидания на заблокированной базе.
@@ -333,6 +335,192 @@ impl Store {
                     weight: row.get(7)?,
                 })
             })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Отклонения, к которым ещё не привязан инцидент, самые тяжёлые первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn loose(&self, limit: usize) -> Result<Vec<(i64, Deviation)>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, source, stream, horizon, at, value, baseline, score, weight
+                   FROM deviations WHERE incident IS NULL
+                  ORDER BY weight DESC, id ASC LIMIT ?1",
+            )?;
+            let rows = query.query_map(params![limit], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    Deviation {
+                        source: row.get(1)?,
+                        stream: Stream::new(row.get::<_, String>(2)?),
+                        horizon: row.get(3)?,
+                        at: Minute::at(row.get(4)?),
+                        value: row.get(5)?,
+                        baseline: row.get(6)?,
+                        score: row.get::<_, Option<f64>>(7)?.unwrap_or(f64::INFINITY),
+                        weight: row.get(8)?,
+                    },
+                ))
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Привязывает отклонение к инциденту: открывает новый или продлевает
+    /// открытый с той же парой «сервис плюс сигнатура».
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn attach(
+        &self,
+        deviation: i64,
+        service: &Service,
+        signature: &Signature,
+        found: &Deviation,
+    ) -> Result<(i64, bool), StoreError> {
+        let service = service.as_str().to_owned();
+        let signature = signature.as_str().to_owned();
+        let found = found.clone();
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            let open = change
+                .query_row(
+                    "SELECT id FROM incidents
+                      WHERE service = ?1 AND signature = ?2 AND state = 'open'",
+                    params![service, signature],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            let (id, fresh) = if let Some(id) = open {
+                change.execute(
+                    "UPDATE incidents
+                        SET last = MAX(last, ?2), seen = seen + 1,
+                            peak = MAX(peak, ?3), weight = MAX(weight, ?4)
+                      WHERE id = ?1",
+                    params![id, found.at.stamp(), found.value, found.weight],
+                )?;
+                (id, false)
+            } else {
+                change.execute(
+                    "INSERT INTO incidents
+                       (service, signature, stream, source, state, began, last,
+                        seen, peak, weight)
+                     VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?5, 1, ?6, ?7)",
+                    params![
+                        service,
+                        signature,
+                        found.stream.as_str(),
+                        found.source,
+                        found.at.stamp(),
+                        found.value,
+                        found.weight
+                    ],
+                )?;
+                (change.last_insert_rowid(), true)
+            };
+            change.execute(
+                "UPDATE deviations SET incident = ?2 WHERE id = ?1",
+                params![deviation, id],
+            )?;
+            change.commit()?;
+            Ok((id, fresh))
+        })
+        .await
+    }
+
+    /// Закрывает инциденты, о которых давно нет вестей.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn hush(&self, before: Minute) -> Result<usize, StoreError> {
+        self.work(move |db| {
+            Ok(db.execute(
+                "UPDATE incidents SET state = 'closed' WHERE state = 'open' AND last < ?1",
+                params![before.stamp()],
+            )?)
+        })
+        .await
+    }
+
+    /// Отмечает связь между инцидентами, начавшимися рядом во времени.
+    ///
+    /// Связь взаимна и хранится обеими сторонами: карточка любого из них
+    /// должна показывать соседа, а не только тот, кто пришёл вторым.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn link(&self, incident: i64, apart: i64) -> Result<usize, StoreError> {
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            let near = change
+                .prepare(
+                    "SELECT id FROM incidents
+                      WHERE id <> ?1 AND state = 'open'
+                        AND ABS(began - (SELECT began FROM incidents WHERE id = ?1)) <= ?2",
+                )?
+                .query_map(params![incident, apart], |row| row.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut tie = change
+                .prepare("INSERT OR IGNORE INTO links (incident, related) VALUES (?1, ?2)")?;
+            for other in &near {
+                tie.execute(params![incident, other])?;
+                tie.execute(params![other, incident])?;
+            }
+            drop(tie);
+            change.commit()?;
+            Ok(near.len())
+        })
+        .await
+    }
+
+    /// Инциденты, свежие сверху.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn incidents(&self, open: bool, limit: usize) -> Result<Vec<Incident>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, service, signature, stream, source, state, began, last,
+                        seen, peak, weight, verdict
+                   FROM incidents
+                  WHERE (?1 = 0 OR state = 'open')
+                  ORDER BY last DESC, id DESC LIMIT ?2",
+            )?;
+            let rows = query.query_map(params![i64::from(open), limit], |row| {
+                Ok(Incident {
+                    id: row.get(0)?,
+                    service: Service::new(row.get::<_, String>(1)?),
+                    signature: Signature::stored(row.get::<_, String>(2)?),
+                    stream: Stream::new(row.get::<_, String>(3)?),
+                    source: row.get(4)?,
+                    state: State::of(&row.get::<_, String>(5)?),
+                    began: Minute::at(row.get(6)?),
+                    last: Minute::at(row.get(7)?),
+                    seen: row.get(8)?,
+                    peak: row.get(9)?,
+                    weight: row.get(10)?,
+                    verdict: row.get::<_, Option<i64>>(11)?.map(|it| it == 1),
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Связанные инциденты.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn related(&self, incident: i64) -> Result<Vec<i64>, StoreError> {
+        self.work(move |db| {
+            let mut query =
+                db.prepare("SELECT related FROM links WHERE incident = ?1 ORDER BY related")?;
+            let rows = query.query_map(params![incident], |row| row.get::<_, i64>(0))?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
         .await

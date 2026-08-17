@@ -56,6 +56,18 @@ impl Filter {
         )
     }
 
+    /// Запрос живых записей одного потока за промежуток.
+    #[must_use]
+    pub fn samples(&self, stream: &str, span: Span) -> String {
+        format!(
+            "_time:[{}, {}) ({}){} AND _stream:{stream} | fields _msg",
+            stamp(span.from().start()),
+            stamp(span.to().start()),
+            self.pattern,
+            self.foreign()
+        )
+    }
+
     /// Отсечение собственных потоков; пустая строка, когда исключать нечего.
     fn foreign(&self) -> String {
         if self.exclude.is_empty() {

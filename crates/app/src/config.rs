@@ -96,6 +96,8 @@ pub struct File {
     #[serde(default)]
     pub collector: Collector,
     #[serde(default)]
+    pub incidents: Incidents,
+    #[serde(default)]
     pub queue: Queue,
     #[serde(default)]
     pub retention: Retention,
@@ -180,6 +182,31 @@ pub struct Collector {
     /// Сколько минут просить у источника за один запрос.
     #[serde(default = "default_chunk", with = "humantime_serde")]
     pub chunk: Duration,
+    #[serde(flatten)]
+    rest: BTreeMap<String, toml::Value>,
+}
+
+/// Инциденты: группировка, связи, тишина.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Incidents {
+    /// Метки селектора, из которых берётся имя сервиса, в порядке предпочтения.
+    #[serde(default = "default_labels")]
+    pub service_labels: Vec<String>,
+    /// Сколько отклонений разбирать за проход.
+    #[serde(default = "default_batch")]
+    pub batch: usize,
+    /// Сколько строк тянуть на сигнатуру.
+    #[serde(default = "default_samples")]
+    pub samples: usize,
+    /// За какое окно брать образцы.
+    #[serde(default = "default_sample_window", with = "humantime_serde")]
+    pub sample_window: Duration,
+    /// Через сколько тишины инцидент закрывается.
+    #[serde(default = "default_silence", with = "humantime_serde")]
+    pub silence: Duration,
+    /// Насколько близко во времени инциденты считаются связанными.
+    #[serde(default = "default_link", with = "humantime_serde")]
+    pub link: Duration,
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
 }
@@ -282,6 +309,7 @@ impl File {
         collect("metrics", &self.metrics.rest, &mut found);
         collect("model", &self.model.rest, &mut found);
         collect("collector", &self.collector.rest, &mut found);
+        collect("incidents", &self.incidents.rest, &mut found);
         collect("queue", &self.queue.rest, &mut found);
         collect("retention", &self.retention.rest, &mut found);
         for horizon in &self.horizons {
@@ -316,6 +344,20 @@ impl Default for Collector {
         Self {
             backfill: default_backfill(),
             chunk: default_chunk(),
+            rest: BTreeMap::new(),
+        }
+    }
+}
+
+impl Default for Incidents {
+    fn default() -> Self {
+        Self {
+            service_labels: default_labels(),
+            batch: default_batch(),
+            samples: default_samples(),
+            sample_window: default_sample_window(),
+            silence: default_silence(),
+            link: default_link(),
             rest: BTreeMap::new(),
         }
     }
@@ -388,6 +430,27 @@ fn default_score() -> f64 {
 }
 fn default_ratio() -> f64 {
     2.0
+}
+fn default_labels() -> Vec<String> {
+    ["service", "container", "job", "app"]
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect()
+}
+fn default_batch() -> usize {
+    50
+}
+fn default_samples() -> usize {
+    200
+}
+fn default_sample_window() -> Duration {
+    Duration::from_mins(15)
+}
+fn default_silence() -> Duration {
+    Duration::from_mins(30)
+}
+fn default_link() -> Duration {
+    Duration::from_mins(5)
 }
 fn default_backfill() -> Duration {
     Duration::from_hours(2)

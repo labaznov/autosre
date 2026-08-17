@@ -17,6 +17,7 @@ pub struct Metrics {
     last_bucket: AtomicU64,
     failures: AtomicU64,
     deviations: AtomicU64,
+    incidents: AtomicU64,
 }
 
 impl Metrics {
@@ -28,6 +29,7 @@ impl Metrics {
             last_bucket: AtomicU64::new(0),
             failures: AtomicU64::new(0),
             deviations: AtomicU64::new(0),
+            incidents: AtomicU64::new(0),
         }
     }
 
@@ -40,6 +42,11 @@ impl Metrics {
     pub fn deviations(&self, found: usize) {
         self.deviations
             .fetch_add(found.try_into().unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// Отмечает заведённый инцидент.
+    pub fn incident(&self) {
+        self.incidents.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Отмечает отказ источника или модели.
@@ -81,6 +88,12 @@ impl Metrics {
             "sre_deviations_total",
             "Найденные отклонения",
             &self.deviations.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            &mut out,
+            "sre_incidents_total",
+            "Заведённые инциденты",
+            &self.incidents.load(Ordering::Relaxed).to_string(),
         );
         counter(
             &mut out,

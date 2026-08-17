@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
-use sre_domain::{Bucket, Detector, Deviation, Hour, Minute, Span, Stream, Thresholds};
+use sre_domain::{
+    Bucket, Detector, Deviation, Hour, Minute, Service, Signature, Span, Stream, Thresholds,
+};
 use sre_store::Store;
 use tempfile::TempDir;
 
@@ -483,4 +485,192 @@ async fn keeps_an_endless_score_endless() {
             .score
             .is_infinite()
     );
+}
+
+/// Отклонение потока в заданную минуту — для проверок группировки.
+async fn spotted(base: &Base, stream: &Stream, at: Minute, value: f64) -> (i64, Deviation) {
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], value);
+    let deviation = Deviation::new("logs", stream, "15m", at, verdict);
+    base.store.spot(&deviation, at).await.unwrap();
+    let loose = base.store.loose(10).await.unwrap();
+    let mine = loose
+        .into_iter()
+        .find(|(_, it)| it.stream == *stream && it.at == at)
+        .expect("отклонение не найдено");
+    (mine.0, mine.1)
+}
+
+/// Поток сервиса с заданным именем.
+fn service(name: &str) -> Stream {
+    Stream::new(format!("{{host=\"node-01\",service=\"{name}\"}}"))
+}
+
+#[tokio::test]
+async fn opens_an_incident_for_a_loose_deviation() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+    let (_, fresh) = base
+        .store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+        )
+        .await
+        .unwrap();
+    assert!(fresh);
+}
+
+#[tokio::test]
+async fn keeps_one_incident_for_the_same_service_and_signature() {
+    let base = Base::open();
+    let first = minute("2026-08-17T10:15:00Z");
+    for step in 0..3 {
+        let at = first.back(-step);
+        let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+        base.store
+            .attach(
+                id,
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                &found,
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(base.store.incidents(true, 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn counts_every_deviation_of_an_incident() {
+    let base = Base::open();
+    let first = minute("2026-08-17T10:15:00Z");
+    for step in 0..3 {
+        let at = first.back(-step);
+        let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+        base.store
+            .attach(
+                id,
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                &found,
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(base.store.incidents(true, 10).await.unwrap()[0].seen, 3);
+}
+
+#[tokio::test]
+async fn separates_incidents_of_different_signatures() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    for (step, text) in ["timed out", "no space left"].iter().enumerate() {
+        let when = at.back(-i64::try_from(step).unwrap());
+        let (id, found) = spotted(&base, &wifi(), when, 91.0).await;
+        base.store
+            .attach(id, &Service::new("orders-api"), &Signature::of(text), &found)
+            .await
+            .unwrap();
+    }
+    assert_eq!(base.store.incidents(true, 10).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn takes_a_deviation_out_of_the_loose_pile() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+        )
+        .await
+        .unwrap();
+    assert!(base.store.loose(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn closes_an_incident_that_went_quiet() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+        )
+        .await
+        .unwrap();
+    base.store.hush(at.back(-30)).await.unwrap();
+    assert!(base.store.incidents(true, 10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn keeps_a_closed_incident_in_the_history() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+        )
+        .await
+        .unwrap();
+    base.store.hush(at.back(-30)).await.unwrap();
+    assert_eq!(base.store.incidents(false, 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn ties_incidents_that_began_together() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let mut ids = Vec::new();
+    for name in ["orders-api", "billing-api"] {
+        let (id, found) = spotted(&base, &service(name), at, 91.0).await;
+        ids.push(
+            base.store
+                .attach(id, &Service::new(name), &Signature::of("timed out"), &found)
+                .await
+                .unwrap()
+                .0,
+        );
+    }
+    base.store.link(ids[1], 300).await.unwrap();
+    assert_eq!(base.store.related(ids[0]).await.unwrap(), vec![ids[1]]);
+}
+
+#[tokio::test]
+async fn leaves_distant_incidents_untied() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let mut ids = Vec::new();
+    for (step, name) in ["orders-api", "billing-api"].iter().enumerate() {
+        let when = at.back(-i64::try_from(step).unwrap() * 60);
+        let (id, found) = spotted(&base, &service(name), when, 91.0).await;
+        ids.push(
+            base.store
+                .attach(
+                    id,
+                    &Service::new(*name),
+                    &Signature::of("timed out"),
+                    &found,
+                )
+                .await
+                .unwrap()
+                .0,
+        );
+    }
+    base.store.link(ids[1], 300).await.unwrap();
+    assert!(base.store.related(ids[0]).await.unwrap().is_empty());
 }

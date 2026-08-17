@@ -6,9 +6,13 @@
 pub mod bucket;
 pub mod detector;
 pub mod deviation;
+pub mod incident;
 pub mod minute;
+pub mod signature;
 
 pub use bucket::{Bucket, Kind, Stream};
 pub use detector::{Detector, Thresholds, Verdict};
 pub use deviation::Deviation;
+pub use incident::{Incident, Service, State};
 pub use minute::{Hour, Minute, Span, SpanError};
+pub use signature::{Group, Signature};

@@ -77,24 +77,7 @@ impl Source for Logs {
     }
 
     async fn buckets(&self, span: Span) -> Result<Vec<Bucket>, SourceError> {
-        let query = self.filter.buckets(span);
-        tracing::debug!(query, minutes = span.len(), "запрос к логам");
-        let mut request = self
-            .http
-            .get(self.endpoint.clone())
-            .query(&[("query", query.as_str()), ("limit", &self.rows.to_string())]);
-        if !self.username.is_empty() {
-            request = request.basic_auth(&self.username, Some(&self.password));
-        }
-        let response = request.send().await.map_err(|cause| transport(&cause))?;
-        let status = response.status();
-        let body = response.text().await.map_err(|cause| transport(&cause))?;
-        if !status.is_success() {
-            return Err(SourceError::Status {
-                status: status.as_u16(),
-                body: clip(&body),
-            });
-        }
+        let body = self.ask(&self.filter.buckets(span), self.rows).await?;
         let buckets = rows(&body)?
             .iter()
             .map(bucket)
@@ -105,6 +88,47 @@ impl Source for Logs {
             "счётчики ошибок сняты"
         );
         Ok(buckets)
+    }
+
+    async fn samples(
+        &self,
+        stream: &Stream,
+        span: Span,
+        limit: usize,
+    ) -> Result<Vec<String>, SourceError> {
+        let body = self
+            .ask(&self.filter.samples(stream.as_str(), span), limit)
+            .await?;
+        Ok(rows(&body)?
+            .iter()
+            .filter_map(|row| row.get("_msg").and_then(Value::as_str))
+            .map(ToOwned::to_owned)
+            .collect())
+    }
+}
+
+impl Logs {
+    /// Один запрос к источнику.
+    async fn ask(&self, query: &str, limit: usize) -> Result<String, SourceError> {
+        tracing::debug!(query, limit, "запрос к логам");
+        let mut request = self
+            .http
+            .get(self.endpoint.clone())
+            .query(&[("query", query), ("limit", &limit.to_string())]);
+        if !self.username.is_empty() {
+            request = request.basic_auth(&self.username, Some(&self.password));
+        }
+        let response = request.send().await.map_err(|cause| transport(&cause))?;
+        let status = response.status();
+        let body = response.text().await.map_err(|cause| transport(&cause))?;
+        if status.is_success() {
+            Ok(body)
+        } else {
+            Err(SourceError::Status {
+                status: status.as_u16(),
+                body: clip(&body),
+            })
+        }
     }
 }
 

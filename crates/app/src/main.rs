@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use sre_app::config::{Config, Process};
 use sre_app::metrics::Metrics;
-use sre_app::{VERSION, collector, watcher, web};
+use sre_app::{VERSION, collector, grouper, watcher, web};
 use sre_logs::{Filter, Logs};
 use sre_source::Source;
 use sre_store::Store;
@@ -74,6 +74,7 @@ async fn serve() -> Result<(), Failure> {
     collector::collect(sources.clone(), &store, &metrics, &config.file.collector);
     collector::tidy(&sources, &store, &config.file.retention);
     watcher::watch(&sources, &store, &metrics, &config.file.enabled());
+    grouper::group(&sources, &store, &metrics, &config.file.incidents);
 
     let shared = web::Shared::new(metrics, VERSION);
     let listener = tokio::net::TcpListener::bind(config.file.bind).await?;

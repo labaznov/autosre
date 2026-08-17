@@ -10,7 +10,7 @@
 //! процесс, если такое когда-нибудь понадобится.
 
 use async_trait::async_trait;
-use sre_domain::{Bucket, Span};
+use sre_domain::{Bucket, Span, Stream};
 
 /// Отказы источника.
 ///
@@ -44,4 +44,21 @@ pub trait Source: Send + Sync {
     /// # Errors
     /// [`SourceError`] при недоступности источника или неожиданной форме ответа.
     async fn buckets(&self, span: Span) -> Result<Vec<Bucket>, SourceError>;
+
+    /// Живые записи потока за промежуток — то, из чего считается сигнатура.
+    ///
+    /// У источника метрик записей нет: значение и есть всё, что он знает.
+    /// Поэтому по умолчанию пусто, а не «не поддерживается»: отсутствие
+    /// образцов — обычное дело, а не отказ.
+    ///
+    /// # Errors
+    /// [`SourceError`] при недоступности источника.
+    async fn samples(
+        &self,
+        _stream: &Stream,
+        _span: Span,
+        _limit: usize,
+    ) -> Result<Vec<String>, SourceError> {
+        Ok(Vec::new())
+    }
 }
