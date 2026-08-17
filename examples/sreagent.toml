@@ -27,7 +27,8 @@ select = [
     "node_filesystem_avail_bytes",
     "go_goroutines",
     "process_start_time_seconds",
-    "http_request_duration_seconds_bucket",
+    "http_request_duration_seconds_count",
+    "go_goroutines",
 ]
 
 [model]

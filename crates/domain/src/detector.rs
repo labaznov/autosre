@@ -5,6 +5,8 @@
 //! Медиана и медианное абсолютное отклонение к выбросам нечувствительны — а у
 //! нас вся работа как раз про выбросы.
 
+use crate::bucket::Kind;
+
 /// Пороги срабатывания, свои у каждого горизонта.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Thresholds {
@@ -12,8 +14,14 @@ pub struct Thresholds {
     pub minimum: f64,
     /// Наименьший робастный z-score.
     pub score: f64,
-    /// Во сколько раз окно должно превышать базовую линию.
+    /// Во сколько раз окно должно превышать базовую линию. Для счётчиков.
     pub ratio: f64,
+    /// На какую долю должен сдвинуться уровень. Для метрик-уровней.
+    ///
+    /// Отношение здесь не годится: память, выросшая на четверть, — беда, а
+    /// требование вырасти вдвое означает, что мы заметим её, когда сервис уже
+    /// умрёт.
+    pub drift: f64,
 }
 
 impl Default for Thresholds {
@@ -22,6 +30,7 @@ impl Default for Thresholds {
             minimum: 20.0,
             score: 3.5,
             ratio: 2.0,
+            drift: 0.15,
         }
     }
 }
@@ -40,6 +49,10 @@ pub struct Verdict {
     pub score: f64,
     pub weight: f64,
 }
+
+/// Какая доля шагов должна идти в одну сторону, чтобы движение считалось
+/// стойким, а не дрожанием.
+const STEADY: f64 = 0.7;
 
 /// Предел, выше которого рост оценки уже не влияет на вес.
 ///
@@ -61,29 +74,96 @@ impl Detector {
 
     /// Сравнивает окно с его историей.
     ///
+    /// Правил два, потому что сигналы разные. У счётчика важно, во сколько раз
+    /// стало больше: двадцать ошибок при обычных двух — беда. У уровня важно,
+    /// куда он поехал: память, выросшая на четверть и не вернувшаяся, — беда,
+    /// хотя «во сколько раз» тут смешная величина.
+    ///
     /// Пустой разброс (ровный ряд) даёт бесконечную оценку, поэтому решение в
-    /// этом случае удерживают `minimum` и `ratio`.
+    /// этом случае удерживают пороги величины, а не статистика.
     #[must_use]
-    pub fn verdict(&self, history: &[f64], value: f64) -> Verdict {
+    pub fn verdict(&self, history: &[f64], value: f64, kind: Kind) -> Verdict {
         let baseline = median(history);
         let spread = spread(history, baseline);
+        // Ровная история и любое отличие — оценка бесконечна, но со знаком:
+        // иначе падение уровня при неподвижной базовой линии выглядит как
+        // «ничего не произошло», а это ровно случай убывающего диска.
         let score = if spread > 0.0 {
             0.6745 * (value - baseline) / spread
         } else if value > baseline {
             f64::INFINITY
+        } else if value < baseline {
+            f64::NEG_INFINITY
         } else {
             0.0
         };
+        let deviates = match kind {
+            // У счётчика важен рост: никого не будят оттого, что ошибок стало
+            // меньше.
+            Kind::Sum => {
+                value >= self.thresholds.minimum
+                    && value >= self.thresholds.ratio * baseline
+                    && score >= self.thresholds.score
+            }
+            // У уровня важны обе стороны и, главное, направление. Ровный тренд
+            // робастная оценка не видит по построению: базовая линия ползёт
+            // вместе с ним, и разброс выходит соразмерным шагу. Поэтому уровень
+            // сравнивается со старшей половиной истории, а подтверждением
+            // служит либо стойкость движения, либо всё-таки скачок.
+            Kind::Mean => {
+                let older = median(&history[history.len() / 2..]);
+                drift(value, older) >= self.thresholds.drift
+                    && (steady(history, value) >= STEADY || score.abs() >= self.thresholds.score)
+            }
+        };
         Verdict {
-            deviates: value >= self.thresholds.minimum
-                && score >= self.thresholds.score
-                && value >= self.thresholds.ratio * baseline,
+            deviates,
             value,
             baseline,
             spread,
             score,
-            weight: weight(value, baseline, score),
+            weight: weight(value, baseline, score, kind),
         }
+    }
+}
+
+/// Доля шагов ряда, идущих в сторону общего движения.
+///
+/// История приходит от свежего к старому, поэтому разворачивается: стойким
+/// считается движение, а не порядок чтения.
+fn steady(history: &[f64], value: f64) -> f64 {
+    let mut walk: Vec<f64> = history.iter().rev().copied().collect();
+    walk.push(value);
+    if walk.len() < 3 {
+        return 0.0;
+    }
+    let total = value - walk[0];
+    if total.abs() <= f64::EPSILON {
+        return 0.0;
+    }
+    let same = walk
+        .windows(2)
+        .filter(|pair| (pair[1] - pair[0]) * total > 0.0)
+        .count();
+    ratio(same) / ratio(walk.len() - 1)
+}
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "число окон истории далеко ниже предела точности f64"
+)]
+fn ratio(count: usize) -> f64 {
+    count as f64
+}
+
+/// Насколько уровень отошёл от обычного, в долях от обычного.
+fn drift(value: f64, baseline: f64) -> f64 {
+    if baseline.abs() > f64::EPSILON {
+        (value - baseline).abs() / baseline.abs()
+    } else if value.abs() > f64::EPSILON {
+        f64::INFINITY
+    } else {
+        0.0
     }
 }
 
@@ -96,10 +176,16 @@ impl Detector {
 ///
 /// Дальше сюда добавятся охват, известность сигнатуры и важность сервиса
 /// ([ADR-0018](../../../docs/adr/0018-investigation-queue.md)).
+/// Для уровня превышением считается сдвиг в любую сторону: диск, потерявший
+/// половину свободного места, весит столько же, сколько память, набравшая
+/// столько же.
 #[must_use]
-pub fn weight(value: f64, baseline: f64, score: f64) -> f64 {
-    let excess = (value - baseline).max(0.0);
-    excess * (1.0 + score.min(CAP)).ln()
+pub fn weight(value: f64, baseline: f64, score: f64, kind: Kind) -> f64 {
+    let excess = match kind {
+        Kind::Sum => (value - baseline).max(0.0),
+        Kind::Mean => (value - baseline).abs(),
+    };
+    excess * (1.0 + score.abs().min(CAP)).ln()
 }
 
 /// Медиана ряда; пустой ряд считается нулевым.

@@ -75,6 +75,7 @@ impl Watch {
                 minimum: horizon.minimum,
                 score: horizon.score,
                 ratio: horizon.ratio,
+                drift: horizon.drift,
             }),
         }
     }
@@ -130,7 +131,7 @@ async fn look(source: &str, store: &Store, metrics: &Metrics, horizon: &Watch) {
     }
 
     let mut found = 0;
-    for (stream, windows) in &series {
+    for (stream, (kind, windows)) in &series {
         let Some(value) = windows.first() else {
             continue;
         };
@@ -139,7 +140,7 @@ async fn look(source: &str, store: &Store, metrics: &Metrics, horizon: &Watch) {
             .filter(|index| **index > 0)
             .filter_map(|index| windows.get(*index).copied())
             .collect();
-        let verdict = horizon.detector.verdict(&history, *value);
+        let verdict = horizon.detector.verdict(&history, *value, *kind);
         if !verdict.deviates {
             continue;
         }

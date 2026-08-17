@@ -122,10 +122,10 @@ fn hashed(password: &str) -> String {
 
 /// Заводит инцидент прямо в базе, минуя конвейер.
 async fn incident(agent: &Agent) -> i64 {
-    use sre_domain::{Detector, Deviation, Minute, Service, Signature, Stream, Thresholds};
+    use sre_domain::{Detector, Deviation, Kind, Minute, Service, Signature, Stream, Thresholds};
     let at = Minute::at(1_786_968_660);
     let stream = Stream::new("{host=\"node-01\",service=\"orders-api\"}");
-    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0);
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
     let deviation = Deviation::new("logs", &stream, "15m", at, verdict);
     agent.store.spot(&deviation, at).await.unwrap();
     let id = agent.store.loose(10).await.unwrap()[0].0;

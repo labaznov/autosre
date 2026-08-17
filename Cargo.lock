@@ -1297,6 +1297,7 @@ dependencies = [
  "sha2",
  "sre-domain",
  "sre-logs",
+ "sre-metrics",
  "sre-source",
  "sre-store",
  "tempfile",
@@ -1325,6 +1326,22 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "reqwest",
+ "serde_json",
+ "sre-domain",
+ "sre-source",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "sre-metrics"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
  "reqwest",
  "serde_json",
  "sre-domain",

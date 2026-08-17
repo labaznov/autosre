@@ -172,6 +172,9 @@ pub struct Horizon {
     pub score: f64,
     #[serde(default = "default_ratio")]
     pub ratio: f64,
+    /// На какую долю должен сдвинуться уровень метрики.
+    #[serde(default = "default_drift")]
+    pub drift: f64,
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
 }
@@ -468,6 +471,9 @@ fn default_backfill() -> Duration {
 }
 fn default_chunk() -> Duration {
     Duration::from_hours(1)
+}
+fn default_drift() -> f64 {
+    0.15
 }
 fn default_parallel() -> usize {
     4

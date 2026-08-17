@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use sre_domain::{
-    Bucket, Deviation, Hour, Incident, Minute, Service, Signature, Span, State, Stream, Tally,
+    Bucket, Deviation, Hour, Incident, Kind, Minute, Service, Signature, Span, State, Stream, Tally,
 };
 use tokio::task;
 
@@ -190,6 +190,9 @@ impl Store {
 
     /// Окна горизонта по всем потокам источника, свежие первыми.
     ///
+    /// Счётчики складываются, уровни усредняются — иначе «окно» уровня было бы
+    /// пятнадцатикратной памятью, числом без смысла.
+    ///
     /// Один запрос на источник, а не на поток: двести сервисов — это двести
     /// потоков, и запрос на каждый вернул бы нас к тому, от чего ушли.
     ///
@@ -205,16 +208,17 @@ impl Store {
         end: Minute,
         width: usize,
         count: usize,
-    ) -> Result<BTreeMap<Stream, Vec<f64>>, StoreError> {
+    ) -> Result<BTreeMap<Stream, (Kind, Vec<f64>)>, StoreError> {
         let source = source.to_owned();
         let seconds = i64::try_from(width).unwrap_or(15) * 60;
         let start = end.stamp() - seconds * i64::try_from(count).unwrap_or(24);
         self.work(move |db| {
             let mut query = db.prepare(
-                "SELECT stream, (?4 - at - 1) / ?5 AS window, SUM(value)
+                "SELECT stream, (?4 - at - 1) / ?5 AS window, kind,
+                        CASE kind WHEN 1 THEN AVG(value) ELSE SUM(value) END
                    FROM buckets
                   WHERE source = ?1 AND at >= ?2 AND at < ?3
-                  GROUP BY stream, window",
+                  GROUP BY stream, window, kind",
             )?;
             let rows = query.query_map(
                 params![source, start, end.stamp(), end.stamp(), seconds],
@@ -222,20 +226,21 @@ impl Store {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
-                        row.get::<_, f64>(2)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, f64>(3)?,
                     ))
                 },
             )?;
-            let mut series: BTreeMap<Stream, Vec<f64>> = BTreeMap::new();
+            let mut series: BTreeMap<Stream, (Kind, Vec<f64>)> = BTreeMap::new();
             for row in rows {
-                let (stream, index, value) = row?;
+                let (stream, index, kind, value) = row?;
                 let line = series
                     .entry(Stream::new(stream))
-                    .or_insert_with(|| vec![0.0; count]);
+                    .or_insert_with(|| (Kind::of(kind), vec![0.0; count]));
                 if let Ok(index) = usize::try_from(index)
                     && index < count
                 {
-                    line[index] = value;
+                    line.1[index] = value;
                 }
             }
             Ok(series)
@@ -324,14 +329,18 @@ impl Store {
                    FROM deviations ORDER BY weight DESC, id DESC LIMIT ?1",
             )?;
             let rows = query.query_map(params![limit], |row| {
+                let value: f64 = row.get(4)?;
+                let baseline: f64 = row.get(5)?;
                 Ok(Deviation {
                     source: row.get(0)?,
                     stream: Stream::new(row.get::<_, String>(1)?),
                     horizon: row.get(2)?,
                     at: Minute::at(row.get(3)?),
-                    value: row.get(4)?,
-                    baseline: row.get(5)?,
-                    score: row.get::<_, Option<f64>>(6)?.unwrap_or(f64::INFINITY),
+                    value,
+                    baseline,
+                    score: row
+                        .get::<_, Option<f64>>(6)?
+                        .unwrap_or_else(|| endless(value, baseline)),
                     weight: row.get(7)?,
                 })
             })?;
@@ -352,6 +361,8 @@ impl Store {
                   ORDER BY weight DESC, id ASC LIMIT ?1",
             )?;
             let rows = query.query_map(params![limit], |row| {
+                let value: f64 = row.get(5)?;
+                let baseline: f64 = row.get(6)?;
                 Ok((
                     row.get::<_, i64>(0)?,
                     Deviation {
@@ -359,9 +370,11 @@ impl Store {
                         stream: Stream::new(row.get::<_, String>(2)?),
                         horizon: row.get(3)?,
                         at: Minute::at(row.get(4)?),
-                        value: row.get(5)?,
-                        baseline: row.get(6)?,
-                        score: row.get::<_, Option<f64>>(7)?.unwrap_or(f64::INFINITY),
+                        value,
+                        baseline,
+                        score: row
+                            .get::<_, Option<f64>>(7)?
+                            .unwrap_or_else(|| endless(value, baseline)),
                         weight: row.get(8)?,
                     },
                 ))
@@ -725,6 +738,16 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
         tracing::info!(step = number + 1, "схема базы обновлена");
     }
     Ok(())
+}
+
+/// Бесконечная оценка со знаком: в базе она пустая, а направление видно по
+/// числам, которые лежат рядом.
+fn endless(value: f64, baseline: f64) -> f64 {
+    if value < baseline {
+        f64::NEG_INFINITY
+    } else {
+        f64::INFINITY
+    }
 }
 
 /// Берёт соединение, восстанавливая его после паники другого потока: `SQLite`

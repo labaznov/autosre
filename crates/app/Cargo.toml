@@ -27,6 +27,7 @@ serde_json.workspace = true
 sha2 = "0.10"
 sre-domain = { path = "../domain" }
 sre-logs = { path = "../logs" }
+sre-metrics = { path = "../metrics" }
 sre-source = { path = "../source" }
 sre-store = { path = "../store" }
 thiserror.workspace = true

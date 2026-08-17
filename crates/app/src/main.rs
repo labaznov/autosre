@@ -97,7 +97,14 @@ async fn serve() -> Result<(), Failure> {
             config.file.logs.self_streams.clone(),
         )?,
     )?);
-    let sources = vec![logs];
+    let metrics_source: Arc<dyn Source> =
+        Arc::new(sre_metrics::Metrics::new(&sre_metrics::Settings {
+            url: config.file.metrics.url.parse()?,
+            timeout: config.file.metrics.timeout,
+            select: config.file.metrics.select.clone(),
+            labels: config.file.incidents.service_labels.clone(),
+        })?);
+    let sources = vec![logs, metrics_source];
     collector::collect(sources.clone(), &store, &metrics, &config.file.collector);
     collector::tidy(&sources, &store, &config.file.retention);
     watcher::watch(&sources, &store, &metrics, &config.file.enabled());

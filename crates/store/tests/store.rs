@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use sre_domain::{
-    Bucket, Detector, Deviation, Hour, Minute, Service, Signature, Span, Stream, Thresholds,
+    Bucket, Detector, Deviation, Hour, Kind, Minute, Service, Signature, Span, Stream, Thresholds,
 };
 use sre_store::Store;
 use tempfile::TempDir;
@@ -339,7 +339,7 @@ async fn sums_the_minutes_of_a_window() {
             .unwrap();
     }
     let series = base.store.windows("logs", end, 15, 4).await.unwrap();
-    assert!((series[&wifi()][0] - 30.0).abs() < f64::EPSILON);
+    assert!((series[&wifi()].1[0] - 30.0).abs() < f64::EPSILON);
 }
 
 #[tokio::test]
@@ -356,7 +356,7 @@ async fn puts_the_older_window_further_along() {
         .await
         .unwrap();
     let series = base.store.windows("logs", end, 15, 4).await.unwrap();
-    assert!((series[&wifi()][1] - 7.0).abs() < f64::EPSILON);
+    assert!((series[&wifi()].1[1] - 7.0).abs() < f64::EPSILON);
 }
 
 #[tokio::test]
@@ -373,7 +373,7 @@ async fn counts_a_window_without_buckets_as_zero() {
         .await
         .unwrap();
     let series = base.store.windows("logs", end, 15, 4).await.unwrap();
-    assert!(series[&wifi()][2].abs() < f64::EPSILON);
+    assert!(series[&wifi()].1[2].abs() < f64::EPSILON);
 }
 
 #[tokio::test]
@@ -398,7 +398,7 @@ async fn takes_one_query_for_every_stream() {
 async fn writes_down_a_deviation() {
     let base = Base::open();
     let at = minute("2026-08-17T10:15:00Z");
-    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0);
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
     base.store
         .spot(&Deviation::new("logs", &wifi(), "15m", at, verdict), at)
         .await
@@ -410,7 +410,7 @@ async fn writes_down_a_deviation() {
 async fn writes_the_same_window_down_once() {
     let base = Base::open();
     let at = minute("2026-08-17T10:15:00Z");
-    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0);
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
     let deviation = Deviation::new("logs", &wifi(), "15m", at, verdict);
     base.store.spot(&deviation, at).await.unwrap();
     assert!(!base.store.spot(&deviation, at).await.unwrap());
@@ -422,7 +422,7 @@ async fn puts_the_heaviest_deviation_first() {
     let at = minute("2026-08-17T10:15:00Z");
     let detector = Detector::new(Thresholds::default());
     for (stream, value) in [("light", 40.0), ("heavy", 900.0)] {
-        let verdict = detector.verdict(&[4.0, 4.0, 5.0], value);
+        let verdict = detector.verdict(&[4.0, 4.0, 5.0], value, Kind::Sum);
         let stream = Stream::new(format!("{{service=\"{stream}\"}}"));
         base.store
             .spot(&Deviation::new("logs", &stream, "15m", at, verdict), at)
@@ -439,7 +439,7 @@ async fn puts_the_heaviest_deviation_first() {
 async fn keeps_the_numbers_of_a_deviation() {
     let base = Base::open();
     let at = minute("2026-08-17T10:15:00Z");
-    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0);
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
     base.store
         .spot(&Deviation::new("logs", &wifi(), "15m", at, verdict), at)
         .await
@@ -475,7 +475,7 @@ async fn counts_an_unsnapped_window_as_empty() {
 async fn keeps_an_endless_score_endless() {
     let base = Base::open();
     let at = minute("2026-08-17T10:15:00Z");
-    let verdict = Detector::new(Thresholds::default()).verdict(&[0.0, 0.0, 0.0], 91.0);
+    let verdict = Detector::new(Thresholds::default()).verdict(&[0.0, 0.0, 0.0], 91.0, Kind::Sum);
     base.store
         .spot(&Deviation::new("logs", &wifi(), "15m", at, verdict), at)
         .await
@@ -489,7 +489,7 @@ async fn keeps_an_endless_score_endless() {
 
 /// Отклонение потока в заданную минуту — для проверок группировки.
 async fn spotted(base: &Base, stream: &Stream, at: Minute, value: f64) -> (i64, Deviation) {
-    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], value);
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], value, Kind::Sum);
     let deviation = Deviation::new("logs", stream, "15m", at, verdict);
     base.store.spot(&deviation, at).await.unwrap();
     let loose = base.store.loose(10).await.unwrap();
@@ -673,4 +673,20 @@ async fn leaves_distant_incidents_untied() {
     }
     base.store.link(ids[1], 300).await.unwrap();
     assert!(base.store.related(ids[0]).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn keeps_the_sign_of_an_endless_score() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let verdict = Detector::new(Thresholds::default()).verdict(&[900.0, 900.0], 100.0, Kind::Mean);
+    base.store
+        .spot(&Deviation::new("metrics", &wifi(), "1h", at, verdict), at)
+        .await
+        .unwrap();
+    assert!(
+        base.store.deviations(10).await.unwrap()[0]
+            .score
+            .is_sign_negative()
+    );
 }
