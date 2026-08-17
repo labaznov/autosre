@@ -14,12 +14,17 @@ name = "sreagent"
 path = "src/main.rs"
 
 [dependencies]
+argon2 = { version = "0.5", features = ["std"] }
+askama = "0.14"
 async-trait = "0.1"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+base64 = "0.22"
+hmac = "0.12"
+axum = { version = "0.8", default-features = false, features = ["form", "http1", "json", "tokio"] }
 humantime-serde = "1"
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 sre-domain = { path = "../domain" }
 sre-logs = { path = "../logs" }
 sre-source = { path = "../source" }
@@ -32,6 +37,8 @@ url = "2"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt"] }
 
 [dev-dependencies]
+argon2 = { version = "0.5", features = ["std"] }
+sre-domain = { path = "../domain" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

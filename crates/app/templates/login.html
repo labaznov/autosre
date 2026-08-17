@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Вход{% endblock %}
+
+{% block content %}
+<form class="door" method="post" action="/login">
+  <h1>Вход</h1>
+  {% if failed %}<p class="broken">Не пускает: проверьте логин и пароль</p>{% endif %}
+  <label>Логин<input name="login" autocomplete="username" autofocus></label>
+  <label>Пароль<input name="password" type="password" autocomplete="current-password"></label>
+  <button type="submit">Войти</button>
+</form>
+{% endblock %}

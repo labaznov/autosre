@@ -7,6 +7,8 @@ pub mod collector;
 pub mod config;
 pub mod grouper;
 pub mod metrics;
+pub mod session;
+pub mod view;
 pub mod watcher;
 pub mod web;
 

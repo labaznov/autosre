@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Лента — Агент диагностики{% endblock %}
+
+{% block nav %}
+<nav>
+  <span class="who">{{ who }}</span>
+  <form method="post" action="/logout"><button class="plain">выйти</button></form>
+</nav>
+{% endblock %}
+
+{% block content %}
+{% if incidents.is_empty() %}
+  <p class="empty">Инцидентов нет. Либо всё спокойно, либо базовая линия ещё копится</p>
+{% endif %}
+
+{% for incident in incidents %}
+  <article class="incident {% if incident.open %}live{% endif %}">
+    <header>
+      <span class="state">{{ incident.state }}</span>
+      <a class="service" href="/incident/{{ incident.id }}">{{ incident.service }}</a>
+      <span class="stamp">{{ incident.began }} · {{ incident.alive }}</span>
+    </header>
+    <p class="signature">{{ incident.signature }}</p>
+    <p class="numbers">
+      пик {{ incident.peak }} за окно · подтверждений {{ incident.seen }} ·
+      вес {{ incident.weight }}
+      {% if !incident.related.is_empty() %}
+        · рядом:
+        {% for other in incident.related %}<a href="/incident/{{ other }}">#{{ other }}</a>{% endfor %}
+      {% endif %}
+    </p>
+  </article>
+{% endfor %}
+{% endblock %}

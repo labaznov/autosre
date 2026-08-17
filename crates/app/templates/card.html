@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}{{ incident.service }} — Агент диагностики{% endblock %}
+
+{% block nav %}
+<nav>
+  <a href="/">к ленте</a>
+  <span class="who">{{ who }}</span>
+  <form method="post" action="/logout"><button class="plain">выйти</button></form>
+</nav>
+{% endblock %}
+
+{% block content %}
+<article class="incident single {% if incident.open %}live{% endif %}">
+  <header>
+    <span class="state">{{ incident.state }}</span>
+    <h1>{{ incident.service }}</h1>
+    <span class="stamp">#{{ incident.id }}</span>
+  </header>
+
+  <p class="signature">{{ incident.signature }}</p>
+
+  <dl class="facts">
+    <dt>Начался</dt><dd>{{ incident.began }}</dd>
+    <dt>Последнее подтверждение</dt><dd>{{ incident.last }}</dd>
+    <dt>Длится</dt><dd>{{ incident.alive }}</dd>
+    <dt>Подтверждений</dt><dd>{{ incident.seen }}</dd>
+    <dt>Пик за окно</dt><dd>{{ incident.peak }}</dd>
+    <dt>Вес</dt><dd>{{ incident.weight }}</dd>
+    <dt>Источник</dt><dd>{{ incident.source }}</dd>
+    <dt>Поток</dt><dd><code>{{ incident.stream }}</code></dd>
+  </dl>
+
+  {% if !incident.related.is_empty() %}
+    <p class="related">
+      Началось рядом во времени:
+      {% for other in incident.related %}<a href="/incident/{{ other }}">#{{ other }}</a>{% endfor %}
+      — возможно, одна причина.
+    </p>
+  {% endif %}
+</article>
+{% endblock %}

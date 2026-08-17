@@ -95,6 +95,9 @@ pub struct File {
     pub horizons: Vec<Horizon>,
     #[serde(default)]
     pub collector: Collector,
+    /// Учётные записи веб-морды.
+    #[serde(default, rename = "account")]
+    pub accounts: Vec<Account>,
     #[serde(default)]
     pub incidents: Incidents,
     #[serde(default)]
@@ -184,6 +187,14 @@ pub struct Collector {
     pub chunk: Duration,
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
+}
+
+/// Учётная запись: имя и хеш пароля.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Account {
+    pub login: String,
+    /// Хеш argon2. Пароль в открытом виде сюда не попадает никогда.
+    pub password: String,
 }
 
 /// Инциденты: группировка, связи, тишина.

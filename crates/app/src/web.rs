@@ -1,28 +1,50 @@
 //! Веб-морда агента.
 //!
-//! Пока только то, что доступно без входа: здоровье и собственные метрики.
-//! Всё остальное появится вместе с лентой инцидентов и потребует логина.
+//! Здоровье и собственные метрики открыты — их спрашивает мониторинг. Всё
+//! остальное требует входа: на экране содержимое прод-логов
+//! ([ADR-0020](../../../docs/adr/0020-login-and-password.md)).
 
 use std::sync::Arc;
 
-use axum::extract::State;
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use askama::Template;
+use axum::extract::{Form, Path, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
+use sre_store::Store;
 
 use crate::metrics::Metrics;
+use crate::session::{COOKIE, Doorman};
+use crate::view::Card;
+
+/// Стили: вшиты в бинарь, чтобы образ оставался одним файлом.
+const STYLE: &str = include_str!("../static/style.css");
 
 /// Разделяемое обработчиками состояние.
 #[derive(Clone)]
 pub struct Shared {
     metrics: Arc<Metrics>,
+    store: Store,
+    doorman: Arc<Doorman>,
     version: &'static str,
 }
 
 impl Shared {
     #[must_use]
-    pub fn new(metrics: Arc<Metrics>, version: &'static str) -> Self {
-        Self { metrics, version }
+    pub fn new(
+        metrics: Arc<Metrics>,
+        store: Store,
+        doorman: Doorman,
+        version: &'static str,
+    ) -> Self {
+        Self {
+            metrics,
+            store,
+            doorman: Arc::new(doorman),
+            version,
+        }
     }
 
     #[must_use]
@@ -31,12 +53,120 @@ impl Shared {
     }
 }
 
-/// Маршруты, открытые без входа.
+/// Все маршруты агента.
 pub fn routes(shared: Shared) -> Router {
     Router::new()
+        .route("/", get(feed))
+        .route("/incident/{id}", get(card))
+        .route("/login", get(door).post(enter))
+        .route("/logout", post(leave))
+        .route("/static/style.css", get(style))
         .route("/api/health", get(health))
         .route("/metrics", get(expose))
         .with_state(shared)
+}
+
+#[derive(Template)]
+#[template(path = "feed.html")]
+struct Feed {
+    incidents: Vec<Card>,
+    who: String,
+}
+
+#[derive(Template)]
+#[template(path = "card.html")]
+struct Single {
+    incident: Card,
+    who: String,
+}
+
+#[derive(Template)]
+#[template(path = "login.html")]
+struct Door {
+    failed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct Credentials {
+    login: String,
+    password: String,
+}
+
+/// Лента инцидентов.
+async fn feed(State(shared): State<Shared>, headers: HeaderMap) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    match shared.store.incidents(false, 100).await {
+        Ok(incidents) => {
+            let mut cards = Vec::with_capacity(incidents.len());
+            for incident in incidents {
+                let related = shared.store.related(incident.id).await.unwrap_or_default();
+                cards.push(Card::of(incident, related));
+            }
+            render(&Feed {
+                incidents: cards,
+                who,
+            })
+        }
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+/// Карточка одного инцидента.
+async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i64>) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    match shared.store.incidents(false, 500).await {
+        Ok(incidents) => match incidents.into_iter().find(|it| it.id == id) {
+            Some(incident) => {
+                let related = shared.store.related(id).await.unwrap_or_default();
+                render(&Single {
+                    incident: Card::of(incident, related),
+                    who,
+                })
+            }
+            None => failure(StatusCode::NOT_FOUND, "инцидент не найден"),
+        },
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+async fn door() -> Response {
+    render(&Door { failed: false })
+}
+
+async fn enter(State(shared): State<Shared>, Form(given): Form<Credentials>) -> Response {
+    match shared.doorman.admit(&given.login, &given.password) {
+        Some(session) => (
+            [(
+                header::SET_COOKIE,
+                format!("{COOKIE}={session}; Path=/; HttpOnly; SameSite=Lax"),
+            )],
+            Redirect::to("/"),
+        )
+            .into_response(),
+        None => {
+            tracing::warn!(login = given.login, "вход не удался");
+            render(&Door { failed: true })
+        }
+    }
+}
+
+async fn leave() -> Response {
+    (
+        [(
+            header::SET_COOKIE,
+            format!("{COOKIE}=; Path=/; HttpOnly; Max-Age=0"),
+        )],
+        Redirect::to("/login"),
+    )
+        .into_response()
+}
+
+async fn style() -> Response {
+    ([("content-type", "text/css; charset=utf-8")], STYLE).into_response()
 }
 
 async fn health(State(shared): State<Shared>) -> Response {
@@ -53,4 +183,25 @@ async fn expose(State(shared): State<Shared>) -> Response {
         shared.metrics.expose(),
     )
         .into_response()
+}
+
+/// Имя вошедшего или отказ.
+fn guard(shared: &Shared, headers: &HeaderMap) -> Option<String> {
+    let cookies = headers.get(header::COOKIE)?.to_str().ok()?;
+    let session = cookies
+        .split(';')
+        .map(str::trim)
+        .find_map(|it| it.strip_prefix(&format!("{COOKIE}=")))?;
+    shared.doorman.who(session)
+}
+
+fn render<T: Template>(page: &T) -> Response {
+    match page.render() {
+        Ok(html) => Html(html).into_response(),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+fn failure(status: StatusCode, message: &str) -> Response {
+    (status, Json(serde_json::json!({ "error": message }))).into_response()
 }

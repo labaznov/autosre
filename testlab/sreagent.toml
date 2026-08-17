@@ -55,6 +55,11 @@ minimum = 100
 score = 3.0
 ratio = 1.5
 
+[[account]]
+login = "duty"
+# Хеш пароля. Получить: sreagent hash <пароль>
+password = "$argon2id$v=19$m=19456,t=2,p=1$N37Zjt7tGuTCu2B+BSpYRg$XeW5g91ZGp+auvy/iHsxYZVjWU4AtGqpmMudBuLJNHM"
+
 [collector]
 # Насколько глубоко закрывать дыры в ряду при старте и сколько минут просить
 # у источника за один запрос.

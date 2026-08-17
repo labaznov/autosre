@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use sre_app::config::{Config, Process};
 use sre_app::metrics::Metrics;
+use sre_app::session::Doorman;
 use sre_app::{VERSION, collector, grouper, watcher, web};
 use sre_logs::{Filter, Logs};
 use sre_source::Source;
@@ -20,6 +21,14 @@ async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_env("SREAGENT_LOG").unwrap_or_else(|_| "info".into()))
         .init();
+    if let Some(password) = hashing() {
+        let Ok(hash) = hash(&password) else {
+            tracing::error!("пароль не захеширован");
+            return ExitCode::FAILURE;
+        };
+        println!("{hash}");
+        return ExitCode::SUCCESS;
+    }
     match serve().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(failure) => {
@@ -27,6 +36,24 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Пароль, который просят захешировать: `sreagent hash <пароль>`.
+///
+/// Учётку без этого не завести: в конфигурации лежит хеш, а не пароль, и
+/// считать его где-то на стороне — верный способ отправить пароль не туда.
+fn hashing() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    (args.next()? == "hash").then(|| args.next()).flatten()
+}
+
+/// Хеш пароля в форме, которую понимает конфигурация.
+fn hash(password: &str) -> Result<String, argon2::password_hash::Error> {
+    use argon2::password_hash::rand_core::OsRng;
+    use argon2::password_hash::{PasswordHasher, SaltString};
+    Ok(argon2::Argon2::default()
+        .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))?
+        .to_string())
 }
 
 /// Отказы запуска.
@@ -76,7 +103,11 @@ async fn serve() -> Result<(), Failure> {
     watcher::watch(&sources, &store, &metrics, &config.file.enabled());
     grouper::group(&sources, &store, &metrics, &config.file.incidents);
 
-    let shared = web::Shared::new(metrics, VERSION);
+    let doorman = Doorman::new(config.file.accounts.clone(), &config.secrets.session);
+    if doorman.empty() {
+        tracing::warn!("учётных записей нет: в веб-морду не войти никому");
+    }
+    let shared = web::Shared::new(metrics, store.clone(), doorman, VERSION);
     let listener = tokio::net::TcpListener::bind(config.file.bind).await?;
     tracing::info!(
         address = %config.file.bind,
