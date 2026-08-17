@@ -89,6 +89,23 @@ def send(url, body, kind):
         print(f"не отправлено: {failure}", file=sys.stderr, flush=True)
 
 
+def wait_for(url, patience=120):
+    """Ждёт, пока источник начнёт отвечать.
+
+    Готовность проверяет тот, кому она нужна: в образах Victoria нет ни wget,
+    ни curl, поэтому средствами compose дождаться их нельзя.
+    """
+    until = time.time() + patience
+    while time.time() < until:
+        try:
+            with urllib.request.urlopen(f"{url}/health", timeout=3) as answer:
+                answer.read()
+                return
+        except (urllib.error.URLError, OSError):
+            time.sleep(1)
+    print(f"источник {url} так и не ответил за {patience}с", file=sys.stderr, flush=True)
+
+
 def storm(minute):
     """Идёт ли сейчас всплеск и у кого.
 
@@ -175,6 +192,8 @@ def minute_of(at):
 
 def main():
     random.seed(SEED)
+    wait_for(LOGS)
+    wait_for(METRICS)
     now = minute_of(datetime.now(UTC))
     start = now - timedelta(hours=SEED_HOURS)
 

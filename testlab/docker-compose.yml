@@ -11,10 +11,6 @@ services:
       - "9428:9428"
     volumes:
       - logs:/data
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
-      interval: 5s
-      retries: 10
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:latest
@@ -26,10 +22,6 @@ services:
       - "8428:8428"
     volumes:
       - metrics:/data
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8428/health"]
-      interval: 5s
-      retries: 10
 
   # Поток, похожий на прод: ровный фон и сценарии по расписанию.
   generator:
@@ -41,11 +33,11 @@ services:
       # не с чем сравнивать, а ждать шесть часов на каждом запуске незачем.
       SEED_HOURS: "6"
       RANDOM_SEED: "20260817"
+    # Готовности источников генератор дожидается сам: в образах Victoria нет
+    # ни wget, ни curl, и проверка здоровья средствами compose там невозможна.
     depends_on:
-      victorialogs:
-        condition: service_healthy
-      victoriametrics:
-        condition: service_healthy
+      - victorialogs
+      - victoriametrics
 
   # Агент. Поднимается отдельно: `docker compose --profile agent up -d`,
   # чтобы лабораторию можно было держать и без него.
@@ -65,8 +57,7 @@ services:
       - ./sreagent.toml:/etc/sreagent/sreagent.toml:ro
       - agent:/opt/data/sreagent
     depends_on:
-      victorialogs:
-        condition: service_healthy
+      - victorialogs
 
 volumes:
   logs:
