@@ -94,6 +94,8 @@ pub struct File {
     #[serde(default, rename = "horizon")]
     pub horizons: Vec<Horizon>,
     #[serde(default)]
+    pub collector: Collector,
+    #[serde(default)]
     pub queue: Queue,
     #[serde(default)]
     pub retention: Retention,
@@ -162,6 +164,19 @@ pub struct Horizon {
     pub score: f64,
     #[serde(default = "default_ratio")]
     pub ratio: f64,
+    #[serde(flatten)]
+    rest: BTreeMap<String, toml::Value>,
+}
+
+/// Съём наблюдений.
+#[derive(Debug, Deserialize)]
+pub struct Collector {
+    /// Насколько глубоко закрывать дыры при старте.
+    #[serde(default = "default_backfill", with = "humantime_serde")]
+    pub backfill: Duration,
+    /// Сколько минут просить у источника за один запрос.
+    #[serde(default = "default_chunk", with = "humantime_serde")]
+    pub chunk: Duration,
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
 }
@@ -237,6 +252,11 @@ impl File {
                 )));
             }
         }
+        if self.collector.chunk.is_zero() {
+            return Err(ConfigError::Invalid(
+                "размер куска дозапроса равен нулю: просить будет нечего".to_owned(),
+            ));
+        }
         if self.queue.parallel == 0 {
             return Err(ConfigError::Invalid(
                 "потолок одновременных расследований равен нулю: разбирать будет некому".to_owned(),
@@ -252,6 +272,7 @@ impl File {
         collect("logs", &self.logs.rest, &mut found);
         collect("metrics", &self.metrics.rest, &mut found);
         collect("model", &self.model.rest, &mut found);
+        collect("collector", &self.collector.rest, &mut found);
         collect("queue", &self.queue.rest, &mut found);
         collect("retention", &self.retention.rest, &mut found);
         for horizon in &self.horizons {
@@ -278,6 +299,16 @@ fn collect(section: &str, rest: &BTreeMap<String, toml::Value>, found: &mut Vec<
         } else {
             format!("{section}.{key}")
         });
+    }
+}
+
+impl Default for Collector {
+    fn default() -> Self {
+        Self {
+            backfill: default_backfill(),
+            chunk: default_chunk(),
+            rest: BTreeMap::new(),
+        }
     }
 }
 
@@ -345,6 +376,12 @@ fn default_score() -> f64 {
 }
 fn default_ratio() -> f64 {
     2.0
+}
+fn default_backfill() -> Duration {
+    Duration::from_hours(2)
+}
+fn default_chunk() -> Duration {
+    Duration::from_hours(1)
 }
 fn default_parallel() -> usize {
     4

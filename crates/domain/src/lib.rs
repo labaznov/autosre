@@ -6,5 +6,5 @@
 pub mod bucket;
 pub mod minute;
 
-pub use bucket::{Bucket, Stream};
-pub use minute::{Minute, Span, SpanError};
+pub use bucket::{Bucket, Kind, Stream};
+pub use minute::{Hour, Minute, Span, SpanError};

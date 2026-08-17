@@ -70,7 +70,9 @@ async fn serve() -> Result<(), Failure> {
             config.file.logs.self_streams.clone(),
         )?,
     )?);
-    collector::collect(vec![logs], &store, &metrics);
+    let sources = vec![logs];
+    collector::collect(sources.clone(), &store, &metrics, &config.file.collector);
+    collector::tidy(&sources, &store, &config.file.retention);
 
     let shared = web::Shared::new(metrics, VERSION);
     let listener = tokio::net::TcpListener::bind(config.file.bind).await?;

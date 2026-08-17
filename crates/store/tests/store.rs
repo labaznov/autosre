@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sre_domain::{Bucket, Minute, Span, Stream};
+use sre_domain::{Bucket, Hour, Minute, Span, Stream};
 use sre_store::Store;
 use tempfile::TempDir;
 
@@ -37,7 +37,11 @@ async fn saves_what_was_snapped() {
     let base = Base::open();
     let at = minute("2026-08-17T10:01:00Z");
     base.store
-        .save("logs", Span::single(at), vec![Bucket::new(wifi(), at, 7.0)])
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 7.0)],
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -55,7 +59,7 @@ async fn replaces_a_repeated_minute_instead_of_doubling_it() {
             .save(
                 "logs",
                 Span::single(at),
-                vec![Bucket::new(wifi(), at, value)],
+                vec![Bucket::counted(wifi(), at, value)],
             )
             .await
             .unwrap();
@@ -72,7 +76,11 @@ async fn keeps_one_row_after_a_repeated_minute() {
     let at = minute("2026-08-17T10:01:00Z");
     for _ in 0..3 {
         base.store
-            .save("logs", Span::single(at), vec![Bucket::new(wifi(), at, 7.0)])
+            .save(
+                "logs",
+                Span::single(at),
+                vec![Bucket::counted(wifi(), at, 7.0)],
+            )
             .await
             .unwrap();
     }
@@ -84,7 +92,11 @@ async fn separates_the_sources() {
     let base = Base::open();
     let at = minute("2026-08-17T10:01:00Z");
     base.store
-        .save("logs", Span::single(at), vec![Bucket::new(wifi(), at, 7.0)])
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 7.0)],
+        )
         .await
         .unwrap();
     assert_eq!(base.store.count("metrics").await.unwrap(), 0);
@@ -142,8 +154,169 @@ async fn survives_a_reopen_of_the_same_file() {
     let at = minute("2026-08-17T10:01:00Z");
     Store::open(&path)
         .unwrap()
-        .save("logs", Span::single(at), vec![Bucket::new(wifi(), at, 7.0)])
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 7.0)],
+        )
         .await
         .unwrap();
     assert_eq!(Store::open(&path).unwrap().count("logs").await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn rolls_the_minutes_of_an_hour_into_one() {
+    let base = Base::open();
+    let hour = minute("2026-08-17T10:00:00Z");
+    for step in 0..60 {
+        let at = hour.back(-step);
+        base.store
+            .save(
+                "logs",
+                Span::single(at),
+                vec![Bucket::counted(wifi(), at, 2.0)],
+            )
+            .await
+            .unwrap();
+    }
+    base.store.roll("logs", hour.back(-60)).await.unwrap();
+    assert_eq!(
+        base.store
+            .hour("logs", &wifi(), Hour::of(hour))
+            .await
+            .unwrap(),
+        Some(120.0)
+    );
+}
+
+#[tokio::test]
+async fn averages_a_level_instead_of_summing_it() {
+    let base = Base::open();
+    let hour = minute("2026-08-17T10:00:00Z");
+    for step in 1..=4 {
+        let at = hour.back(-i64::from(step));
+        base.store
+            .save(
+                "metrics",
+                Span::single(at),
+                vec![Bucket::level(wifi(), at, f64::from(step))],
+            )
+            .await
+            .unwrap();
+    }
+    base.store.roll("metrics", hour.back(-60)).await.unwrap();
+    assert_eq!(
+        base.store
+            .hour("metrics", &wifi(), Hour::of(hour))
+            .await
+            .unwrap(),
+        Some(2.5)
+    );
+}
+
+#[tokio::test]
+async fn takes_the_rolled_minutes_out_of_the_series() {
+    let base = Base::open();
+    let hour = minute("2026-08-17T10:00:00Z");
+    base.store
+        .save(
+            "logs",
+            Span::single(hour),
+            vec![Bucket::counted(wifi(), hour, 2.0)],
+        )
+        .await
+        .unwrap();
+    base.store.roll("logs", hour.back(-60)).await.unwrap();
+    assert_eq!(base.store.count("logs").await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn rolls_one_hour_at_a_time() {
+    let base = Base::open();
+    let first = minute("2026-08-17T10:00:00Z");
+    for at in [first, first.back(-60), first.back(-120)] {
+        base.store
+            .save(
+                "logs",
+                Span::single(at),
+                vec![Bucket::counted(wifi(), at, 1.0)],
+            )
+            .await
+            .unwrap();
+    }
+    let rolled = base.store.roll("logs", first.back(-180)).await.unwrap();
+    assert_eq!(rolled.hour, Some(Hour::of(first)));
+}
+
+#[tokio::test]
+async fn says_when_there_is_nothing_left_to_roll() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:00:00Z");
+    base.store
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 1.0)],
+        )
+        .await
+        .unwrap();
+    base.store.roll("logs", at.back(-60)).await.unwrap();
+    assert!(!base.store.roll("logs", at.back(-60)).await.unwrap().more);
+}
+
+#[tokio::test]
+async fn leaves_the_fresh_minutes_alone() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:00:00Z");
+    base.store
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 1.0)],
+        )
+        .await
+        .unwrap();
+    base.store.roll("logs", at).await.unwrap();
+    assert_eq!(base.store.count("logs").await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn forgets_the_marks_of_expired_minutes() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:00:00Z");
+    base.store
+        .save("logs", Span::single(at), vec![])
+        .await
+        .unwrap();
+    base.store
+        .forget("logs", at.back(-1), Hour::of(at).next())
+        .await
+        .unwrap();
+    assert_eq!(base.store.snapped("logs").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn forgets_the_hours_whose_time_has_passed() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:00:00Z");
+    base.store
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 5.0)],
+        )
+        .await
+        .unwrap();
+    base.store.roll("logs", at.back(-60)).await.unwrap();
+    base.store
+        .forget("logs", at.back(-60), Hour::of(at).next())
+        .await
+        .unwrap();
+    assert_eq!(
+        base.store
+            .hour("logs", &wifi(), Hour::of(at))
+            .await
+            .unwrap(),
+        None
+    );
 }

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sre_domain::{Minute, Span, SpanError};
+use sre_domain::{Hour, Minute, Span, SpanError};
 
 fn moment(text: &str) -> DateTime<Utc> {
     text.parse().expect("момент времени некорректен")
@@ -76,5 +76,57 @@ fn refuses_a_span_beyond_the_limit() {
     assert_eq!(
         Span::new(from, from.back(-200), 96).unwrap_err(),
         SpanError::Oversized(200, 96)
+    );
+}
+
+#[test]
+fn folds_neighbouring_minutes_into_one_run() {
+    let from = Minute::of(moment("2026-08-17T10:00:00Z"));
+    let holes = vec![from, from.back(-1), from.back(-2)];
+    assert_eq!(Span::runs(&holes, 60).len(), 1);
+}
+
+#[test]
+fn breaks_a_run_where_the_series_is_whole() {
+    let from = Minute::of(moment("2026-08-17T10:00:00Z"));
+    let holes = vec![from, from.back(-1), from.back(-5), from.back(-6)];
+    assert_eq!(Span::runs(&holes, 60).len(), 2);
+}
+
+#[test]
+fn cuts_a_long_run_by_the_limit() {
+    let from = Minute::of(moment("2026-08-17T10:00:00Z"));
+    let holes: Vec<Minute> = (0..150).map(|step| from.back(-step)).collect();
+    assert_eq!(Span::runs(&holes, 60).len(), 3);
+}
+
+#[test]
+fn keeps_every_minute_of_the_runs() {
+    let from = Minute::of(moment("2026-08-17T10:00:00Z"));
+    let holes: Vec<Minute> = (0..150).map(|step| from.back(-step)).collect();
+    assert_eq!(
+        Span::runs(&holes, 60)
+            .iter()
+            .map(|run| run.len())
+            .sum::<usize>(),
+        150
+    );
+}
+
+#[test]
+fn puts_a_minute_into_its_hour() {
+    assert_eq!(
+        Hour::of(Minute::of(moment("2026-08-17T10:47:00Z"))).stamp(),
+        Minute::of(moment("2026-08-17T10:00:00Z")).stamp()
+    );
+}
+
+#[test]
+fn holds_sixty_minutes_in_an_hour() {
+    assert_eq!(
+        Hour::of(Minute::of(moment("2026-08-17T10:47:00Z")))
+            .span()
+            .len(),
+        60
     );
 }

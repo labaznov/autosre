@@ -121,7 +121,7 @@ fn rows(body: &str) -> Result<Vec<Map<String, Value>>, SourceError> {
 }
 
 fn bucket(row: &Map<String, Value>) -> Result<Bucket, SourceError> {
-    Ok(Bucket::new(
+    Ok(Bucket::counted(
         Stream::new(text(row, "_stream")?),
         Minute::of(moment(row, "_time")?),
         count(row, "total")?,

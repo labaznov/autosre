@@ -31,6 +31,37 @@ impl std::fmt::Display for Stream {
     }
 }
 
+/// Как числа минут складываются в час при свёртке.
+///
+/// Счётчик ошибок за час — сумма минутных. Занятая память за час — среднее:
+/// сумма здесь бессмысленна. Знает об этом источник, а не хранилище, поэтому
+/// признак едет вместе с бакетом.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Kind {
+    /// Складывается: события, запросы, ошибки.
+    Sum,
+    /// Усредняется: уровни — память, место на диске, задержка.
+    Mean,
+}
+
+impl Kind {
+    #[must_use]
+    pub fn code(self) -> i64 {
+        match self {
+            Self::Sum => 0,
+            Self::Mean => 1,
+        }
+    }
+
+    #[must_use]
+    pub fn of(code: i64) -> Self {
+        match code {
+            1 => Self::Mean,
+            _ => Self::Sum,
+        }
+    }
+}
+
 /// Числовой факт за одну минуту.
 ///
 /// У логов это счётчик событий, у метрик — среднее значение либо приращение
@@ -41,15 +72,29 @@ pub struct Bucket {
     pub stream: Stream,
     pub minute: Minute,
     pub value: f64,
+    pub kind: Kind,
 }
 
 impl Bucket {
+    /// Бакет-счётчик: складывается при свёртке.
     #[must_use]
-    pub fn new(stream: Stream, minute: Minute, value: f64) -> Self {
+    pub fn counted(stream: Stream, minute: Minute, value: f64) -> Self {
         Self {
             stream,
             minute,
             value,
+            kind: Kind::Sum,
+        }
+    }
+
+    /// Бакет-уровень: усредняется при свёртке.
+    #[must_use]
+    pub fn level(stream: Stream, minute: Minute, value: f64) -> Self {
+        Self {
+            stream,
+            minute,
+            value,
+            kind: Kind::Mean,
         }
     }
 }

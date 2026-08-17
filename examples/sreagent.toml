@@ -75,6 +75,12 @@ minimum = 15
 score = 4.0
 ratio = 3.0
 
+[collector]
+# Насколько глубоко закрывать дыры в ряду при старте и сколько минут просить
+# у источника за один запрос.
+backfill = "2h"
+chunk = "1h"
+
 [queue]
 parallel = 4
 patience = "15m"

@@ -60,6 +60,45 @@ impl Minute {
     }
 }
 
+/// Час, выровненный по абсолютной границе: единица свёрнутого ряда.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Hour(i64);
+
+/// Секунд в часе.
+const HOURLY: i64 = 3600;
+
+impl Hour {
+    /// Час, в который попадает минута.
+    #[must_use]
+    pub fn of(minute: Minute) -> Self {
+        Self(minute.stamp() - minute.stamp().rem_euclid(HOURLY))
+    }
+
+    #[must_use]
+    pub fn at(stamp: i64) -> Self {
+        Self(stamp - stamp.rem_euclid(HOURLY))
+    }
+
+    #[must_use]
+    pub fn stamp(self) -> i64 {
+        self.0
+    }
+
+    #[must_use]
+    pub fn next(self) -> Self {
+        Self(self.0 + HOURLY)
+    }
+
+    /// Минуты часа: промежуток от его начала до начала следующего.
+    #[must_use]
+    pub fn span(self) -> Span {
+        Span {
+            from: Minute::at(self.0),
+            to: Minute::at(self.next().0),
+        }
+    }
+}
+
 /// Отказы построения промежутка.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SpanError {
@@ -130,6 +169,23 @@ impl Span {
     #[must_use]
     pub fn contains(self, minute: Minute) -> bool {
         minute >= self.from && minute < self.to
+    }
+
+    /// Собирает подряд идущие минуты в промежутки не длиннее предела.
+    ///
+    /// Дыры в ряду редко идут одной полосой: агент мог падать несколько раз.
+    /// Просить каждую минуту отдельным запросом расточительно, а одним
+    /// запросом на всё — значит просить и то, что уже снято.
+    #[must_use]
+    pub fn runs(minutes: &[Minute], limit: usize) -> Vec<Self> {
+        let mut runs: Vec<Self> = Vec::new();
+        for minute in minutes {
+            match runs.last_mut() {
+                Some(run) if run.to == *minute && run.len() < limit => run.to = minute.next(),
+                _ => runs.push(Self::single(*minute)),
+            }
+        }
+        runs
     }
 
     /// Минуты промежутка по порядку.

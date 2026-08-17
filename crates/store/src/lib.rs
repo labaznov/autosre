@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
-use sre_domain::{Bucket, Minute, Span, Stream};
+use sre_domain::{Bucket, Hour, Minute, Span, Stream};
 use tokio::task;
 
 /// Предел ожидания на заблокированной базе.
@@ -47,7 +47,7 @@ impl Store {
         let connection = Connection::open(path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "busy_timeout", BUSY_TIMEOUT)?;
-        connection.execute_batch(schema::SCHEMA)?;
+        migrate(&connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })
@@ -76,8 +76,9 @@ impl Store {
             let change = db.unchecked_transaction()?;
             {
                 let mut bucket = change.prepare(
-                    "INSERT INTO buckets (source, stream, at, value) VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT (source, stream, at) DO UPDATE SET value = excluded.value",
+                    "INSERT INTO buckets (source, stream, at, value, kind) VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT (source, stream, at)
+                     DO UPDATE SET value = excluded.value, kind = excluded.kind",
                 )?;
                 let mut minute =
                     change.prepare("INSERT OR IGNORE INTO minutes (source, at) VALUES (?1, ?2)")?;
@@ -86,7 +87,8 @@ impl Store {
                         source,
                         it.stream.as_str(),
                         it.minute.stamp(),
-                        it.value
+                        it.value,
+                        it.kind.code()
                     ])?;
                 }
                 for it in span.minutes() {
@@ -183,6 +185,115 @@ impl Store {
         .await
     }
 
+    /// Сворачивает один час минутных бакетов в часовые.
+    ///
+    /// По одному часу за вызов, а не всё разом: свёртка недели держала бы
+    /// единственное соединение так долго, что съём минут встал бы, и агент
+    /// ослеп бы ровно на время уборки.
+    ///
+    /// Счётчики складываются, уровни усредняются — как сказал источник
+    /// (`Kind`), а не как удобно хранилищу.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе базы.
+    pub async fn roll(&self, source: &str, before: Minute) -> Result<Rolled, StoreError> {
+        let source = source.to_owned();
+        self.work(move |db| {
+            let Some(oldest) = db
+                .query_row(
+                    "SELECT MIN(at) FROM buckets WHERE source = ?1 AND at < ?2",
+                    params![source, before.stamp()],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .optional()?
+                .flatten()
+            else {
+                return Ok(Rolled::done());
+            };
+            let hour = Hour::at(oldest);
+            let span = hour.span();
+            let change = db.unchecked_transaction()?;
+            let rolled = change.execute(
+                "INSERT INTO hours (source, stream, at, value, kind)
+                 SELECT ?1, stream, ?2,
+                        CASE kind WHEN 1 THEN AVG(value) ELSE SUM(value) END,
+                        kind
+                   FROM buckets
+                  WHERE source = ?1 AND at >= ?3 AND at < ?4
+                  GROUP BY stream, kind
+                 ON CONFLICT (source, stream, at)
+                 DO UPDATE SET value = excluded.value, kind = excluded.kind",
+                params![source, hour.stamp(), span.from().stamp(), span.to().stamp()],
+            )?;
+            change.execute(
+                "DELETE FROM buckets WHERE source = ?1 AND at >= ?2 AND at < ?3",
+                params![source, span.from().stamp(), span.to().stamp()],
+            )?;
+            change.commit()?;
+            Ok(Rolled {
+                hour: Some(hour),
+                streams: rolled,
+                more: true,
+            })
+        })
+        .await
+    }
+
+    /// Забывает то, чей срок вышел.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе базы.
+    pub async fn forget(
+        &self,
+        source: &str,
+        minutes: Minute,
+        hours: Hour,
+    ) -> Result<usize, StoreError> {
+        let source = source.to_owned();
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            let mut gone = change.execute(
+                "DELETE FROM buckets WHERE source = ?1 AND at < ?2",
+                params![source, minutes.stamp()],
+            )?;
+            gone += change.execute(
+                "DELETE FROM minutes WHERE source = ?1 AND at < ?2",
+                params![source, minutes.stamp()],
+            )?;
+            gone += change.execute(
+                "DELETE FROM hours WHERE source = ?1 AND at < ?2",
+                params![source, hours.stamp()],
+            )?;
+            change.commit()?;
+            Ok(gone)
+        })
+        .await
+    }
+
+    /// Значение свёрнутого часа, если оно есть.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn hour(
+        &self,
+        source: &str,
+        stream: &Stream,
+        hour: Hour,
+    ) -> Result<Option<f64>, StoreError> {
+        let source = source.to_owned();
+        let stream = stream.as_str().to_owned();
+        self.work(move |db| {
+            Ok(db
+                .query_row(
+                    "SELECT value FROM hours WHERE source = ?1 AND stream = ?2 AND at = ?3",
+                    params![source, stream, hour.stamp()],
+                    |row| row.get::<_, f64>(0),
+                )
+                .optional()?)
+        })
+        .await
+    }
+
     /// Уносит работу с базой в блокирующий пул.
     async fn work<T, F>(&self, job: F) -> Result<T, StoreError>
     where
@@ -192,6 +303,40 @@ impl Store {
         let connection = Arc::clone(&self.connection);
         task::spawn_blocking(move || job(&guard(&connection))).await?
     }
+}
+
+/// Чем кончилась свёртка одного часа.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rolled {
+    /// Свёрнутый час; `None`, если сворачивать было нечего.
+    pub hour: Option<Hour>,
+    /// Сколько потоков свёрнуто.
+    pub streams: usize,
+    /// Осталось ли что-то ещё: свёртка идёт по часу за вызов.
+    pub more: bool,
+}
+
+impl Rolled {
+    #[must_use]
+    fn done() -> Self {
+        Self {
+            hour: None,
+            streams: 0,
+            more: false,
+        }
+    }
+}
+
+/// Применяет недостающие шаги схемы.
+fn migrate(connection: &Connection) -> Result<(), StoreError> {
+    let applied: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    let applied = usize::try_from(applied).unwrap_or(0);
+    for (number, step) in schema::STEPS.iter().enumerate().skip(applied) {
+        connection.execute_batch(step)?;
+        connection.pragma_update(None, "user_version", number + 1)?;
+        tracing::info!(step = number + 1, "схема базы обновлена");
+    }
+    Ok(())
 }
 
 /// Берёт соединение, восстанавливая его после паники другого потока: `SQLite`
