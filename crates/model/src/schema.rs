@@ -50,7 +50,8 @@ pub fn conclusion() -> Value {
                     "enum": ["logs", "metrics", "neighbours", "ask", "nothing"]
                 },
                 "host": {"type": "string", "maxLength": 120},
-                "command": {"type": "string", "maxLength": 200}
+                "command": {"type": "string", "maxLength": 200},
+                "note": {"type": "string", "maxLength": 80}
             }
         }),
     )

@@ -133,8 +133,11 @@ impl Stand {
             &Arc::new(Metrics::new("тест")),
             &model,
             sre_skills::read(skills.path()).expect("скиллы не прочитаны"),
-            &Digging::default().patient(patience),
-            &Incidents::default(),
+            &sre_app::digger::Recipe {
+                digging: &Digging::default().patient(patience),
+                incidents: &Incidents::default(),
+                knowledge: &sre_app::config::Knowledge::default(),
+            },
         );
         Self {
             store,

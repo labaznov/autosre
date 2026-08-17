@@ -40,6 +40,8 @@ pub struct Finding {
     pub cause: Option<String>,
     pub confidence: Option<f64>,
     pub advice: Option<String>,
+    /// Заметка базы знаний, на которую опёрся вывод.
+    pub note: Option<String>,
 }
 
 /// Заявка в том виде, в каком её читают.
@@ -598,15 +600,18 @@ impl Store {
         cause: &str,
         confidence: f64,
         advice: &str,
+        note: Option<&str>,
         at: Minute,
     ) -> Result<(), StoreError> {
         let (cause, advice) = (cause.to_owned(), advice.to_owned());
+        let note = note.map(ToOwned::to_owned);
         self.work(move |db| {
             db.execute(
                 "UPDATE investigations
-                    SET state = 'done', finished = ?2, cause = ?3, confidence = ?4, advice = ?5
+                    SET state = 'done', finished = ?2, cause = ?3, confidence = ?4,
+                        advice = ?5, note = ?6
                   WHERE id = ?1",
-                params![investigation, at.stamp(), cause, confidence, advice],
+                params![investigation, at.stamp(), cause, confidence, advice, note],
             )?;
             Ok(())
         })
@@ -886,7 +891,7 @@ impl Store {
         self.work(move |db| {
             Ok(db
                 .query_row(
-                    "SELECT id, skill, state, cause, confidence, advice
+                    "SELECT id, skill, state, cause, confidence, advice, note
                        FROM investigations WHERE incident = ?1
                       ORDER BY id DESC LIMIT 1",
                     params![incident],
@@ -898,6 +903,7 @@ impl Store {
                             cause: row.get(3)?,
                             confidence: row.get(4)?,
                             advice: row.get(5)?,
+                            note: row.get(6)?,
                         })
                     },
                 )

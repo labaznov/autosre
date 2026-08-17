@@ -179,4 +179,11 @@ pub const STEPS: &[&str] = &[
         name, title, tags, marks, body, tokenize = 'unicode61 remove_diacritics 2'
     );
     ",
+    // 9. Заметка, на которую опёрся вывод.
+    //
+    // Имя, а не текст: заметка живёт в чужом репозитории и меняется там. Копия
+    // в базе разошлась бы с оригиналом в первый же день.
+    "
+    ALTER TABLE investigations ADD COLUMN note TEXT;
+    ",
 ];

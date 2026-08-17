@@ -29,6 +29,7 @@
       <p class="stamp">
         {% if let Some(confidence) = incident.confidence %}уверенность {{ confidence }}{% endif %}
         {% if let Some(skill) = incident.skill %} · скилл {{ skill }}{% endif %}
+        {% if let Some(note) = incident.note %} · опирается на заметку {{ note }}{% endif %}
       </p>
     </section>
   {% else if let Some(missing) = incident.missing %}
@@ -55,6 +56,10 @@
       {% endif %}
     </section>
   {% endfor %}
+
+  {% if let Some(reading) = incident.reading %}
+    <p class="reading">В базе знаний {{ reading }}</p>
+  {% endif %}
 
   {% if let Some(because) = incident.because %}
     <p class="because">Отсев решил разбираться: {{ because }}</p>

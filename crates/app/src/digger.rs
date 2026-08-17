@@ -19,7 +19,7 @@ use sre_source::Source;
 use sre_store::Store;
 use tokio::sync::Semaphore;
 
-use crate::config::{Digging, Incidents};
+use crate::config::{Digging, Incidents, Knowledge};
 use crate::metrics::Metrics;
 
 /// Всё, что нужно одному расследованию.
@@ -32,6 +32,17 @@ pub struct Digger {
     skills: Arc<Vec<Skill>>,
     settings: Digging,
     incidents: Incidents,
+    knowledge: Knowledge,
+}
+
+/// Настройки, из которых собирается разбор.
+///
+/// Три раздела конфигурации вместе, чтобы не передавать их по одному: разбор
+/// касается и очереди, и инцидентов, и базы знаний.
+pub struct Recipe<'a> {
+    pub digging: &'a Digging,
+    pub incidents: &'a Incidents,
+    pub knowledge: &'a Knowledge,
 }
 
 impl Digger {
@@ -42,8 +53,7 @@ impl Digger {
         metrics: &Arc<Metrics>,
         model: &Arc<Model>,
         skills: Vec<Skill>,
-        settings: &Digging,
-        incidents: &Incidents,
+        recipe: &Recipe<'_>,
     ) -> Self {
         Self {
             sources: sources.to_vec(),
@@ -51,8 +61,9 @@ impl Digger {
             metrics: Arc::clone(metrics),
             model: Arc::clone(model),
             skills: Arc::new(skills),
-            settings: settings.clone(),
-            incidents: incidents.clone(),
+            settings: recipe.digging.clone(),
+            incidents: recipe.incidents.clone(),
+            knowledge: recipe.knowledge.clone(),
         }
     }
 
@@ -204,6 +215,30 @@ async fn investigate(digger: &Digger, incident: &Incident) {
     }
 }
 
+/// Заметка, на которую опёрся вывод, — если такая заметка есть.
+///
+/// Имя проверяется по индексу: модель называет то, что видела в досье, но
+/// «видела» и «перепечатала верно» — разные вещи, а ссылка в карточке обязана
+/// вести на существующую заметку.
+async fn leaned(digger: &Digger, conclusion: &sre_model::Conclusion) -> Option<String> {
+    let named = conclusion.note.as_deref()?.trim();
+    if named.is_empty() {
+        return None;
+    }
+    let known = digger
+        .store
+        .recall(named, digger.knowledge.recall)
+        .await
+        .ok()?
+        .into_iter()
+        .any(|note| note.name == named);
+    if !known {
+        tracing::warn!(note = named, "модель сослалась на заметку, которой нет");
+        return None;
+    }
+    Some(named.to_owned())
+}
+
 /// Оставляет заявку дежурному. Отвечает, удалось ли.
 ///
 /// Не удалось — расследование заканчивается тем, что есть: агент, который
@@ -264,6 +299,7 @@ async fn finish(
     conclusion: &sre_model::Conclusion,
 ) {
     let now = Minute::of(Utc::now());
+    let note = leaned(digger, conclusion).await;
     match digger
         .store
         .conclude(
@@ -271,6 +307,7 @@ async fn finish(
             &conclusion.cause,
             conclusion.confidence,
             &conclusion.advice,
+            note.as_deref(),
             now,
         )
         .await
@@ -371,10 +408,86 @@ async fn collect(
             .await;
         parts.push((want.id.clone(), text));
     }
+    if let Some(part) = similar(digger, incident, investigation, parts.len()).await {
+        parts.push(part);
+    }
     if let Some(part) = replies(digger, incident, investigation, parts.len()).await {
         parts.push(part);
     }
     parts
+}
+
+/// Похожие случаи из базы знаний.
+///
+/// Запрос строится из сигнатуры, сервиса и слов отсева: редкие токены вроде
+/// `ECONNRESET` и делают попадание точным
+/// ([ADR-0008](../../../docs/adr/0008-full-text-knowledge-search.md)). Пустой
+/// результат расследованию не мешает — база знаний бывает и пустой.
+async fn similar(
+    digger: &Digger,
+    incident: &Incident,
+    investigation: i64,
+    ord: usize,
+) -> Option<(String, String)> {
+    let words = format!(
+        "{} {} {}",
+        incident.signature,
+        incident.service,
+        incident.because.clone().unwrap_or_default()
+    );
+    let found = digger
+        .store
+        .recall(&words, digger.knowledge.recall)
+        .await
+        .ok()?;
+    if found.is_empty() {
+        return None;
+    }
+    let text = found
+        .iter()
+        .map(|note| format!("## {} — {}\n{}", note.name, note.title, clip(&note.body)))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let names = found
+        .iter()
+        .map(|note| note.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let _ = digger
+        .store
+        .step(
+            investigation,
+            ord,
+            "knowledge",
+            &format!("по словам «{}» нашлись: {names}", short(&words)),
+            &text,
+        )
+        .await;
+    Some(("похожие случаи из базы знаний".to_owned(), text))
+}
+
+/// Сколько знаков заметки уходит в промпт.
+///
+/// Заметка пишется для человека и бывает на две страницы. Три таких — и досье
+/// вытеснит собой те самые числа, ради которых расследование затевалось.
+const CLIP: usize = 1200;
+
+/// Начало заметки: столько, сколько влезает в бюджет промпта.
+fn clip(body: &str) -> String {
+    if body.chars().count() <= CLIP {
+        return body.to_owned();
+    }
+    let head: String = body.chars().take(CLIP).collect();
+    format!("{head}…")
+}
+
+/// Слова запроса в виде, годном для чтения человеком.
+fn short(words: &str) -> String {
+    words
+        .split_whitespace()
+        .take(8)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Ответы дежурного на прежние заявки — их в досье кладут последними.

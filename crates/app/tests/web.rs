@@ -375,6 +375,7 @@ async fn shows_the_conclusion_on_the_card() {
             "апстрим перестал отвечать после выката",
             0.7,
             "проверить откат апстрима",
+            None,
             sre_domain::Minute::at(1_786_968_720),
         )
         .await

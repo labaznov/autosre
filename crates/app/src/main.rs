@@ -138,8 +138,11 @@ async fn serve() -> Result<(), Failure> {
         &metrics,
         &model,
         skills,
-        &config.file.digging,
-        &config.file.incidents,
+        &digger::Recipe {
+            digging: &config.file.digging,
+            incidents: &config.file.incidents,
+            knowledge: &config.file.knowledge,
+        },
     ));
 
     let doorman = Doorman::new(config.file.accounts.clone(), &config.secrets.session);

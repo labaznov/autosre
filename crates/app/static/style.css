@@ -155,3 +155,5 @@ nav form { display: inline; }
 }
 .badge:hover { text-decoration: underline; }
 .page { font-size: 20px; margin: 0 0 16px; }
+
+.reading { color: var(--dim); font-size: 13px; margin: 8px 0 0; }

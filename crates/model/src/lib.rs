@@ -70,6 +70,9 @@ pub struct Conclusion {
     /// Что выполнить — при `need = ask`.
     #[serde(default)]
     pub command: Option<String>,
+    /// Имя заметки базы знаний, на которую опирается вывод.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 /// Клиент модели.

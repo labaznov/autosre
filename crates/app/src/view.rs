@@ -35,6 +35,10 @@ pub struct Card {
     pub missing: Option<&'static str>,
     /// Заявки к дежурному по этому инциденту.
     pub inquiries: Vec<Question>,
+    /// Заметка, на которую опёрся вывод.
+    pub note: Option<String>,
+    /// По каким словам и что нашлось в базе знаний.
+    pub reading: Option<String>,
 }
 
 /// Заявка в том виде, в каком её читает дежурный.
@@ -122,6 +126,24 @@ impl Card {
                 _ => None,
             }),
             inquiries: Vec::new(),
+            note: finding.and_then(|it| it.note.clone()),
+            reading: None,
+        }
+    }
+
+    /// Та же карточка с тем, что агент читал в базе знаний.
+    ///
+    /// Попадание объяснимо: видно, по каким словам нашлась заметка. Это важно
+    /// ровно тогда, когда дежурный агенту не верит и проверяет его
+    /// ([ADR-0008](../../../docs/adr/0008-full-text-knowledge-search.md)).
+    #[must_use]
+    pub fn reading(self, steps: &[(String, String, String)]) -> Self {
+        Self {
+            reading: steps
+                .iter()
+                .find(|(tool, _, _)| tool == "knowledge")
+                .map(|(_, about, _)| about.clone()),
+            ..self
         }
     }
 

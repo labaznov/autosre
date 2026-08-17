@@ -146,8 +146,14 @@ async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i
                 let related = shared.store.related(id).await.unwrap_or_default();
                 let finding = shared.store.conclusion(id).await.unwrap_or_default();
                 let asked = shared.store.inquiries(id).await.unwrap_or_default();
+                let steps = match &finding {
+                    Some(found) => shared.store.steps(found.id).await.unwrap_or_default(),
+                    None => Vec::new(),
+                };
                 render(&Single {
-                    incident: Card::of(incident, related, finding.as_ref()).asking(&asked),
+                    incident: Card::of(incident, related, finding.as_ref())
+                        .asking(&asked)
+                        .reading(&steps),
                     who,
                     waiting: pending(&shared).await.len(),
                 })
