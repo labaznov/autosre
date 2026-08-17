@@ -138,20 +138,18 @@ async fn door() -> Response {
 }
 
 async fn enter(State(shared): State<Shared>, Form(given): Form<Credentials>) -> Response {
-    match shared.doorman.admit(&given.login, &given.password) {
-        Some(session) => (
-            [(
-                header::SET_COOKIE,
-                format!("{COOKIE}={session}; Path=/; HttpOnly; SameSite=Lax"),
-            )],
-            Redirect::to("/"),
-        )
-            .into_response(),
-        None => {
-            tracing::warn!(login = given.login, "вход не удался");
-            render(&Door { failed: true })
-        }
-    }
+    let Some(session) = shared.doorman.admit(&given.login, &given.password) else {
+        tracing::warn!(login = given.login, "вход не удался");
+        return render(&Door { failed: true });
+    };
+    (
+        [(
+            header::SET_COOKIE,
+            format!("{COOKIE}={session}; Path=/; HttpOnly; SameSite=Lax"),
+        )],
+        Redirect::to("/"),
+    )
+        .into_response()
 }
 
 async fn leave() -> Response {
