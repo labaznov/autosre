@@ -166,9 +166,29 @@ fn keeps_a_stray_pipe_out_of_a_query() {
     assert!(!filled.contains('|'));
 }
 
-#[test]
-fn reads_the_shipped_skills() {
+/// Скиллы поставки: стартовый набор, который едет вместе с агентом.
+fn shipped() -> Vec<Skill> {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/knowledge/skills");
-    assert_eq!(read(&path).unwrap().len(), 4);
+    read(&path).expect("скиллы поставки не прочитаны")
+}
+
+#[test]
+fn reads_the_shipped_skills() {
+    assert_eq!(shipped().len(), 5);
+}
+
+#[test]
+fn covers_every_horizon_the_agent_raises_by_default() {
+    let raised = ["15m", "1h", "24h"];
+    assert!(
+        raised
+            .iter()
+            .all(|horizon| shipped().iter().any(|it| it.front.horizon == *horizon))
+    );
+}
+
+#[test]
+fn hears_every_signal_of_the_shipped_skills() {
+    assert!(shipped().iter().all(Skill::heard));
 }
