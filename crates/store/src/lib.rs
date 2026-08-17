@@ -42,6 +42,20 @@ pub struct Finding {
     pub advice: Option<String>,
 }
 
+/// Заявка в том виде, в каком её читают.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asked {
+    pub id: i64,
+    pub incident: i64,
+    pub host: String,
+    pub command: String,
+    pub reason: String,
+    pub state: String,
+    pub asked: Minute,
+    pub who: Option<String>,
+    pub answer: Option<String>,
+}
+
 /// База наблюдений.
 #[derive(Debug, Clone)]
 pub struct Store {
@@ -481,6 +495,10 @@ impl Store {
     /// Инциденты, ждущие разбора: открытые, без расследования, самые тяжёлые
     /// первыми.
     ///
+    /// Расследование, на заявку которого ответили, инцидент не держит: ответ
+    /// дежурного — это новые данные, и разбор идёт заново, уже с ними
+    /// ([ADR-0011](../../../docs/adr/0011-diagnostic-requests.md)).
+    ///
     /// # Errors
     /// [`StoreError::Sqlite`] на отказе чтения.
     pub async fn awaiting(&self, limit: usize) -> Result<Vec<Incident>, StoreError> {
@@ -490,7 +508,8 @@ impl Store {
                         seen, peak, weight, verdict, because
                    FROM incidents
                   WHERE state = 'open'
-                    AND id NOT IN (SELECT incident FROM investigations)
+                    AND id NOT IN (SELECT incident FROM investigations
+                                    WHERE state <> 'answered')
                   ORDER BY weight DESC, id ASC LIMIT ?1",
             )?;
             let rows = query.query_map(params![limit], read_incident)?;
@@ -565,6 +584,180 @@ impl Store {
                 params![investigation, at.stamp(), cause, confidence, advice],
             )?;
             Ok(())
+        })
+        .await
+    }
+
+    /// Оставляет заявку и останавливает расследование до ответа человека.
+    ///
+    /// Одной транзакцией: расследование, помеченное ожиданием без заявки,
+    /// молчит вечно, а заявка без пометки возвращает инцидент в очередь и
+    /// заводит вторую такую же.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn ask(
+        &self,
+        incident: i64,
+        investigation: i64,
+        inquiry: &sre_domain::Inquiry,
+        at: Minute,
+    ) -> Result<i64, StoreError> {
+        let inquiry = inquiry.clone();
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            change.execute(
+                "INSERT INTO inquiries
+                   (incident, investigation, host, command, reason, state, asked)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'open', ?6)",
+                params![
+                    incident,
+                    investigation,
+                    inquiry.host,
+                    inquiry.command,
+                    inquiry.reason,
+                    at.stamp()
+                ],
+            )?;
+            let id = change.last_insert_rowid();
+            change.execute(
+                "UPDATE investigations SET state = 'waiting', finished = ?2 WHERE id = ?1",
+                params![investigation, at.stamp()],
+            )?;
+            change.commit()?;
+            Ok(id)
+        })
+        .await
+    }
+
+    /// Записывает ответ дежурного и возвращает инцидент в очередь.
+    ///
+    /// Отвечает номером инцидента: тому, кто ответил, надо вернуться на его
+    /// карточку, а закрытая или чужая заявка не отвечает ничем.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn reply(
+        &self,
+        inquiry: i64,
+        who: &str,
+        answer: &str,
+        at: Minute,
+    ) -> Result<Option<i64>, StoreError> {
+        let (who, answer) = (who.to_owned(), answer.to_owned());
+        self.work(move |db| {
+            close(
+                db,
+                inquiry,
+                "UPDATE inquiries
+                    SET state = 'answered', answer = ?2, who = ?3, answered = ?4
+                  WHERE id = ?1 AND state = 'open'",
+                params![inquiry, answer, who, at.stamp()],
+                "answered",
+            )
+        })
+        .await
+    }
+
+    /// Снимает заявку: ответить нечем или незачем.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn shush(
+        &self,
+        inquiry: i64,
+        who: &str,
+        at: Minute,
+    ) -> Result<Option<i64>, StoreError> {
+        let who = who.to_owned();
+        self.work(move |db| {
+            close(
+                db,
+                inquiry,
+                "UPDATE inquiries SET state = 'dropped', who = ?2, answered = ?3
+                  WHERE id = ?1 AND state = 'open'",
+                params![inquiry, who, at.stamp()],
+                "dropped",
+            )
+        })
+        .await
+    }
+
+    /// Гасит заявки, на которые давно никто не ответил.
+    ///
+    /// Заявка без срока — это инцидент, замерший навсегда: расследование ждёт
+    /// человека, а человек про него уже забыл.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn fade(&self, before: Minute) -> Result<usize, StoreError> {
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            let stale = change
+                .prepare("SELECT investigation FROM inquiries WHERE state = 'open' AND asked < ?1")?
+                .query_map(params![before.stamp()], |row| row.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            change.execute(
+                "UPDATE inquiries SET state = 'faded' WHERE state = 'open' AND asked < ?1",
+                params![before.stamp()],
+            )?;
+            let mut mark =
+                change.prepare("UPDATE investigations SET state = 'unanswered' WHERE id = ?1")?;
+            for investigation in &stale {
+                mark.execute(params![investigation])?;
+            }
+            drop(mark);
+            change.commit()?;
+            Ok(stale.len())
+        })
+        .await
+    }
+
+    /// Заявки инцидента, свежие первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn inquiries(&self, incident: i64) -> Result<Vec<Asked>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, incident, host, command, reason, state, asked, who, answer
+                   FROM inquiries WHERE incident = ?1 ORDER BY id DESC",
+            )?;
+            let rows = query.query_map(params![incident], read_inquiry)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Заявки, ждущие человека, самые старые первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn pending(&self, limit: usize) -> Result<Vec<Asked>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, incident, host, command, reason, state, asked, who, answer
+                   FROM inquiries WHERE state = 'open' ORDER BY asked ASC, id ASC LIMIT ?1",
+            )?;
+            let rows = query.query_map(params![limit], read_inquiry)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Отвеченные заявки инцидента: команда и то, что она показала.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn answers(&self, incident: i64) -> Result<Vec<(String, String)>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT command, answer FROM inquiries
+                  WHERE incident = ?1 AND state = 'answered' AND answer IS NOT NULL
+                  ORDER BY id",
+            )?;
+            let rows = query.query_map(params![incident], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
         .await
     }
@@ -971,6 +1164,50 @@ fn read_incident(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
         weight: row.get(10)?,
         verdict: row.get::<_, Option<i64>>(11)?.map(|it| it == 1),
         because: row.get(12)?,
+    })
+}
+
+/// Закрывает открытую заявку и переводит её расследование.
+///
+/// Одной транзакцией: заявка, закрытая без пометки на расследовании, оставляет
+/// инцидент вне очереди навсегда.
+fn close(
+    db: &Connection,
+    inquiry: i64,
+    sentence: &str,
+    values: impl rusqlite::Params,
+    state: &str,
+) -> Result<Option<i64>, StoreError> {
+    let change = db.unchecked_transaction()?;
+    if change.execute(sentence, values)? == 0 {
+        return Ok(None);
+    }
+    change.execute(
+        "UPDATE investigations SET state = ?2
+          WHERE id = (SELECT investigation FROM inquiries WHERE id = ?1)",
+        params![inquiry, state],
+    )?;
+    let incident = change.query_row(
+        "SELECT incident FROM inquiries WHERE id = ?1",
+        params![inquiry],
+        |row| row.get::<_, i64>(0),
+    )?;
+    change.commit()?;
+    Ok(Some(incident))
+}
+
+/// Заявка из строки таблицы.
+fn read_inquiry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Asked> {
+    Ok(Asked {
+        id: row.get(0)?,
+        incident: row.get(1)?,
+        host: row.get(2)?,
+        command: row.get(3)?,
+        reason: row.get(4)?,
+        state: row.get(5)?,
+        asked: Minute::at(row.get(6)?),
+        who: row.get(7)?,
+        answer: row.get(8)?,
     })
 }
 

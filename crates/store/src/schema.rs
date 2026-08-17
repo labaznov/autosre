@@ -142,4 +142,26 @@ pub const STEPS: &[&str] = &[
         PRIMARY KEY (investigation, ord)
     ) WITHOUT ROWID;
     ",
+    // 7. Заявки на диагностику: вопрос человеку и его ответ.
+    //
+    // Заявка держит номер расследования, а не только инцидента: ответ должен
+    // вернуться туда, откуда спрашивали, даже если инцидент за это время
+    // успел набрать других расследований ([ADR-0011](../../../docs/adr/0011-diagnostic-requests.md)).
+    "
+    CREATE TABLE IF NOT EXISTS inquiries (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident      INTEGER NOT NULL,
+        investigation INTEGER NOT NULL,
+        host          TEXT    NOT NULL,
+        command       TEXT    NOT NULL,
+        reason        TEXT    NOT NULL,
+        state         TEXT    NOT NULL,
+        asked         INTEGER NOT NULL,
+        answered      INTEGER,
+        who           TEXT,
+        answer        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS inquiries_open ON inquiries (state, asked);
+    CREATE INDEX IF NOT EXISTS inquiries_incident ON inquiries (incident);
+    ",
 ];

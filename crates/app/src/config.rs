@@ -251,6 +251,12 @@ pub struct Digging {
     /// Сколько инцидент ждёт разбора, прежде чем дойти до дежурного без вывода.
     #[serde(default = "default_patience", with = "humantime_serde")]
     pub patience: Duration,
+    /// Как часто очередь оглядывается: берёт новые инциденты и гасит заявки.
+    #[serde(default = "default_tick", with = "humantime_serde")]
+    pub tick: Duration,
+    /// Сколько заявка ждёт ответа человека, прежде чем погаснуть.
+    #[serde(default = "default_answer", with = "humantime_serde")]
+    pub answer: Duration,
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
 }
@@ -416,6 +422,13 @@ impl Digging {
     pub fn patient(self, patience: Duration) -> Self {
         Self { patience, ..self }
     }
+
+    /// Те же настройки, но с другим шагом очереди: на стенде минута ожидания
+    /// превращает проверку в вечность.
+    #[must_use]
+    pub fn quick(self, tick: Duration) -> Self {
+        Self { tick, ..self }
+    }
 }
 
 impl Default for Digging {
@@ -427,6 +440,8 @@ impl Default for Digging {
             steps: default_steps(),
             wider: default_wider(),
             patience: default_patience(),
+            tick: default_tick(),
+            answer: default_answer(),
             rest: BTreeMap::new(),
         }
     }
@@ -549,6 +564,12 @@ fn default_parallel() -> usize {
 }
 fn default_patience() -> Duration {
     Duration::from_mins(15)
+}
+fn default_tick() -> Duration {
+    Duration::from_mins(1)
+}
+fn default_answer() -> Duration {
+    days(1)
 }
 fn default_minutes() -> Duration {
     days(7)

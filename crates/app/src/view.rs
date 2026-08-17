@@ -6,7 +6,7 @@
 
 use chrono::{TimeZone, Utc};
 use sre_domain::{Incident, Minute, State};
-use sre_store::Finding;
+use sre_store::{Asked, Finding};
 
 /// Инцидент в том виде, в каком его читает человек.
 pub struct Card {
@@ -33,6 +33,43 @@ pub struct Card {
     pub skill: Option<String>,
     /// Разбор не состоялся: очередь не дошла или модель отказала.
     pub missing: Option<&'static str>,
+    /// Заявки к дежурному по этому инциденту.
+    pub inquiries: Vec<Question>,
+}
+
+/// Заявка в том виде, в каком её читает дежурный.
+pub struct Question {
+    pub id: i64,
+    pub host: String,
+    pub command: String,
+    pub reason: String,
+    pub asked: String,
+    pub open: bool,
+    pub who: Option<String>,
+    pub answer: Option<String>,
+    pub state: &'static str,
+}
+
+impl Question {
+    #[must_use]
+    pub fn of(asked: &Asked) -> Self {
+        Self {
+            id: asked.id,
+            host: asked.host.clone(),
+            command: asked.command.clone(),
+            reason: asked.reason.clone(),
+            asked: moment(asked.asked),
+            open: asked.state == "open",
+            who: asked.who.clone(),
+            answer: asked.answer.clone(),
+            state: match asked.state.as_str() {
+                "open" => "ждёт ответа",
+                "answered" => "отвечена",
+                "dropped" => "снята дежурным",
+                _ => "погасла без ответа",
+            },
+        }
+    }
 }
 
 impl Card {
@@ -71,8 +108,23 @@ impl Card {
                 "stale" => Some("разбор устарел и был закрыт"),
                 "running" => Some("разбор идёт"),
                 "unskilled" => Some("разбирать нечем: подходящего скилла нет"),
+                "waiting" => Some("агент ждёт ответа на заявку"),
+                "answered" => Some("ответ получен, разбор пойдёт заново"),
+                "dropped" => Some("заявка снята, разбирать нечем"),
+                "unanswered" => Some("заявка погасла без ответа"),
                 _ => None,
             }),
+            inquiries: Vec::new(),
+        }
+    }
+
+    /// Та же карточка с заявками: они нужны только на своей странице, лента
+    /// обходится счётчиком.
+    #[must_use]
+    pub fn asking(self, inquiries: &[Asked]) -> Self {
+        Self {
+            inquiries: inquiries.iter().map(Question::of).collect(),
+            ..self
         }
     }
 }

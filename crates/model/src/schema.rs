@@ -28,6 +28,11 @@ pub fn triage() -> Value {
 /// `need` — просьба добрать данные. Меню закрытое: выдумать инструмент модель
 /// не может, а неизвестное имя — отказ шага, а не расследования
 /// ([ADR-0002](../../../docs/adr/0002-bounded-tools.md)).
+///
+/// `ask` — просьба к человеку: команда, которой нет ни в логах, ни в метриках
+/// ([ADR-0011](../../../docs/adr/0011-diagnostic-requests.md)). Команду ещё
+/// проверят на безобидность, но в схеме её длина ограничена уже здесь: заявка
+/// на три экрана не годится к копипасту.
 #[must_use]
 pub fn conclusion() -> Value {
     object(
@@ -42,8 +47,10 @@ pub fn conclusion() -> Value {
                 "advice": {"type": "string", "maxLength": 400},
                 "need": {
                     "type": "string",
-                    "enum": ["logs", "metrics", "neighbours", "nothing"]
-                }
+                    "enum": ["logs", "metrics", "neighbours", "ask", "nothing"]
+                },
+                "host": {"type": "string", "maxLength": 120},
+                "command": {"type": "string", "maxLength": 200}
             }
         }),
     )

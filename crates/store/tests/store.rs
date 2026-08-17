@@ -799,3 +799,183 @@ async fn keeps_the_data_after_a_repeated_migration() {
         .unwrap();
     assert_eq!(Store::open(&path).unwrap().count("logs").await.unwrap(), 1);
 }
+
+/// Инцидент с одним отклонением: с него начинается всякая заявка.
+async fn opened(base: &Base, at: Minute) -> i64 {
+    let (id, found) = spotted(base, &wifi(), at, 91.0).await;
+    base.store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+            "стоит разобрать",
+        )
+        .await
+        .unwrap()
+        .0
+}
+
+/// Инцидент с расследованием, оставившим заявку.
+async fn inquired(base: &Base, at: Minute) -> (i64, i64) {
+    let incident = opened(base, at).await;
+    let dig = base.store.dig(incident, "error-burst", at).await.unwrap();
+    let inquiry = base
+        .store
+        .ask(
+            incident,
+            dig,
+            &sre_domain::Inquiry::new("node-01", "df -h /var", "место на диске").unwrap(),
+            at,
+        )
+        .await
+        .unwrap();
+    (incident, inquiry)
+}
+
+#[tokio::test]
+async fn keeps_the_command_the_agent_asked_for() {
+    let base = Base::open();
+    let (incident, _) = inquired(&base, minute("2026-08-17T10:15:00Z")).await;
+    assert_eq!(
+        base.store.inquiries(incident).await.unwrap()[0].command,
+        "df -h /var"
+    );
+}
+
+#[tokio::test]
+async fn holds_the_incident_while_the_inquiry_is_open() {
+    let base = Base::open();
+    inquired(&base, minute("2026-08-17T10:15:00Z")).await;
+    assert!(base.store.awaiting(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn puts_the_incident_back_in_line_once_answered() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (_, inquiry) = inquired(&base, at).await;
+    base.store
+        .reply(inquiry, "букин", "/var 98% занято", at)
+        .await
+        .unwrap();
+    assert_eq!(base.store.awaiting(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn hands_the_answer_to_the_next_investigation() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (incident, inquiry) = inquired(&base, at).await;
+    base.store
+        .reply(inquiry, "букин", "/var 98% занято", at)
+        .await
+        .unwrap();
+    assert_eq!(
+        base.store.answers(incident).await.unwrap(),
+        vec![("df -h /var".to_owned(), "/var 98% занято".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn signs_the_answer_with_a_name() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (incident, inquiry) = inquired(&base, at).await;
+    base.store
+        .reply(inquiry, "букин", "занято", at)
+        .await
+        .unwrap();
+    assert_eq!(
+        base.store.inquiries(incident).await.unwrap()[0]
+            .who
+            .as_deref(),
+        Some("букин")
+    );
+}
+
+#[tokio::test]
+async fn answers_an_inquiry_once() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (_, inquiry) = inquired(&base, at).await;
+    base.store
+        .reply(inquiry, "букин", "занято", at)
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .reply(inquiry, "другой", "нет", at)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn shows_an_open_inquiry_among_those_waiting() {
+    let base = Base::open();
+    inquired(&base, minute("2026-08-17T10:15:00Z")).await;
+    assert_eq!(base.store.pending(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn takes_an_answered_inquiry_out_of_the_waiting_list() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (_, inquiry) = inquired(&base, at).await;
+    base.store
+        .reply(inquiry, "букин", "занято", at)
+        .await
+        .unwrap();
+    assert!(base.store.pending(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn lets_the_duty_engineer_drop_an_inquiry() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (_, inquiry) = inquired(&base, at).await;
+    base.store.shush(inquiry, "букин", at).await.unwrap();
+    assert!(base.store.pending(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn fades_an_inquiry_nobody_answered() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    inquired(&base, at).await;
+    assert_eq!(
+        base.store
+            .fade(minute("2026-08-18T10:15:00Z"))
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn keeps_a_faded_inquiry_out_of_the_queue() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    inquired(&base, at).await;
+    base.store
+        .fade(minute("2026-08-18T10:15:00Z"))
+        .await
+        .unwrap();
+    assert!(base.store.awaiting(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn spares_a_fresh_inquiry_from_fading() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    inquired(&base, at).await;
+    assert_eq!(
+        base.store
+            .fade(minute("2026-08-16T10:20:00Z"))
+            .await
+            .unwrap(),
+        0
+    );
+}

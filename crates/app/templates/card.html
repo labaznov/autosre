@@ -34,6 +34,27 @@
     <p class="missing">{{ missing }}. Числа выше — всё, что есть.</p>
   {% endif %}
 
+  {% for inquiry in incident.inquiries %}
+    <section class="inquiry {% if inquiry.open %}live{% endif %}">
+      <h2>Заявка на {{ inquiry.host }}</h2>
+      <p class="reason">{{ inquiry.reason }}</p>
+      <pre class="command">{{ inquiry.command }}</pre>
+      {% if inquiry.open %}
+        <form method="post" action="/inquiry/{{ inquiry.id }}/answer">
+          <textarea name="answer" rows="6" placeholder="вывод команды"></textarea>
+          <button>ответить</button>
+          <span class="hint">пустой ответ снимет заявку</span>
+        </form>
+      {% else %}
+        {% if let Some(answer) = inquiry.answer %}<pre class="answer">{{ answer }}</pre>{% endif %}
+        <p class="stamp">
+          {{ inquiry.state }}{% if let Some(who) = inquiry.who %} · {{ who }}{% endif %}
+          · спрошено {{ inquiry.asked }}
+        </p>
+      {% endif %}
+    </section>
+  {% endfor %}
+
   {% if let Some(because) = incident.because %}
     <p class="because">Отсев решил разбираться: {{ because }}</p>
   {% endif %}

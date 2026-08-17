@@ -69,7 +69,7 @@ pub fn dig(digger: Digger) {
     let slots = Arc::new(Semaphore::new(digger.settings.parallel.max(1)));
     tokio::spawn(async move {
         resume(&digger).await;
-        let mut ticker = tokio::time::interval(Duration::from_mins(1));
+        let mut ticker = tokio::time::interval(digger.settings.tick.max(Duration::from_secs(1)));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
@@ -80,6 +80,7 @@ pub fn dig(digger: Digger) {
 
 /// Один проход очереди: раздать свободные места самым тяжёлым.
 async fn turn(digger: &Digger, slots: &Arc<Semaphore>) {
+    fade(digger).await;
     let waiting = match digger.store.awaiting(digger.settings.batch).await {
         Ok(waiting) => waiting,
         Err(failure) => {
@@ -103,6 +104,19 @@ async fn turn(digger: &Digger, slots: &Arc<Semaphore>) {
             let _place = place;
             investigate(&digger, &incident).await;
         });
+    }
+}
+
+/// Гасит заявки, на которые никто не ответил за отпущенный срок.
+///
+/// Заявка без срока — это инцидент, замерший навсегда: агент ждёт человека, а
+/// человек про заявку забыл на другой день.
+pub async fn fade(digger: &Digger) {
+    let waited = i64::try_from(digger.settings.answer.as_secs() / 60).unwrap_or(24 * 60);
+    match digger.store.fade(Minute::of(Utc::now()).back(waited)).await {
+        Ok(0) => {}
+        Ok(gone) => tracing::warn!(gone, "заявки погасли без ответа"),
+        Err(failure) => tracing::error!(%failure, "заявки не проверены"),
     }
 }
 
@@ -163,7 +177,10 @@ async fn investigate(digger: &Digger, incident: &Incident) {
         match digger.model.conclude(&skill.body, &asked).await {
             Ok(conclusion) => {
                 let need = conclusion.need.clone().unwrap_or_default();
-                let wanted = step < steps && need != "nothing" && !need.is_empty();
+                if need == "ask" && inquire(digger, incident, investigation, &conclusion).await {
+                    return;
+                }
+                let wanted = step < steps && !matches!(need.as_str(), "nothing" | "ask" | "");
                 let extra = if wanted {
                     more(digger, incident, &need, investigation, dossier.len()).await
                 } else {
@@ -183,6 +200,58 @@ async fn investigate(digger: &Digger, incident: &Incident) {
                 let _ = digger.store.drop_dig(investigation, "failed").await;
                 return;
             }
+        }
+    }
+}
+
+/// Оставляет заявку дежурному. Отвечает, удалось ли.
+///
+/// Не удалось — расследование заканчивается тем, что есть: агент, который
+/// вместо вывода промолчал и ничего не спросил, бесполезен вдвойне.
+async fn inquire(
+    digger: &Digger,
+    incident: &Incident,
+    investigation: i64,
+    conclusion: &sre_model::Conclusion,
+) -> bool {
+    let host = conclusion
+        .host
+        .clone()
+        .unwrap_or_else(|| incident.service.to_string());
+    let Some(command) = conclusion.command.as_deref() else {
+        tracing::warn!(
+            incident = incident.id,
+            "модель просит команду, но не назвала её"
+        );
+        return false;
+    };
+    let inquiry = match sre_domain::Inquiry::new(&host, command, &conclusion.advice) {
+        Ok(inquiry) => inquiry,
+        Err(refused) => {
+            tracing::warn!(incident = incident.id, %refused, "заявка отклонена");
+            return false;
+        }
+    };
+    match digger
+        .store
+        .ask(incident.id, investigation, &inquiry, Minute::of(Utc::now()))
+        .await
+    {
+        Ok(id) => {
+            digger.metrics.inquiry();
+            tracing::info!(
+                incident = incident.id,
+                inquiry = id,
+                host = inquiry.host,
+                command = inquiry.command,
+                "заявка дежурному оставлена"
+            );
+            true
+        }
+        Err(failure) => {
+            digger.metrics.failure();
+            tracing::error!(%failure, "заявка не записана");
+            false
         }
     }
 }
@@ -302,7 +371,37 @@ async fn collect(
             .await;
         parts.push((want.id.clone(), text));
     }
+    if let Some(part) = replies(digger, incident, investigation, parts.len()).await {
+        parts.push(part);
+    }
     parts
+}
+
+/// Ответы дежурного на прежние заявки — их в досье кладут последними.
+///
+/// Ради них заявка и заводилась: без этой части петля не замкнута, и
+/// расследование заново упрётся в то же самое место
+/// ([ADR-0011](../../../docs/adr/0011-diagnostic-requests.md)).
+async fn replies(
+    digger: &Digger,
+    incident: &Incident,
+    investigation: i64,
+    ord: usize,
+) -> Option<(String, String)> {
+    let answers = digger.store.answers(incident.id).await.ok()?;
+    if answers.is_empty() {
+        return None;
+    }
+    let text = answers
+        .iter()
+        .map(|(command, answer)| format!("$ {command}\n{answer}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let _ = digger
+        .store
+        .step(investigation, ord, "ask", "ответ дежурного", &text)
+        .await;
+    Some(("ответы дежурного".to_owned(), text))
 }
 
 /// Добор данных по просьбе модели. Меню закрытое: чего нет в нём, того нет.

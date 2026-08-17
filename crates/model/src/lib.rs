@@ -61,9 +61,15 @@ pub struct Conclusion {
     pub confidence: f64,
     /// Куда смотреть дежурному.
     pub advice: String,
-    /// Чего не хватило: `logs`, `metrics`, `neighbours` или `nothing`.
+    /// Чего не хватило: `logs`, `metrics`, `neighbours`, `ask` или `nothing`.
     #[serde(default)]
     pub need: Option<String>,
+    /// Где выполнить команду — при `need = ask`.
+    #[serde(default)]
+    pub host: Option<String>,
+    /// Что выполнить — при `need = ask`.
+    #[serde(default)]
+    pub command: Option<String>,
 }
 
 /// Клиент модели.

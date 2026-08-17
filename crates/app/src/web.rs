@@ -61,6 +61,7 @@ pub fn routes(shared: Shared) -> Router {
         .route("/", get(feed))
         .route("/incident/{id}", get(card))
         .route("/incident/{id}/verdict", post(verdict))
+        .route("/inquiry/{id}/answer", post(answer))
         .route("/api/metrics", get(quality))
         .route("/login", get(door).post(enter))
         .route("/logout", post(leave))
@@ -132,8 +133,9 @@ async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i
             Some(incident) => {
                 let related = shared.store.related(id).await.unwrap_or_default();
                 let finding = shared.store.conclusion(id).await.unwrap_or_default();
+                let asked = shared.store.inquiries(id).await.unwrap_or_default();
                 render(&Single {
-                    incident: Card::of(incident, related, finding.as_ref()),
+                    incident: Card::of(incident, related, finding.as_ref()).asking(&asked),
                     who,
                 })
             }
@@ -169,6 +171,47 @@ async fn verdict(
             Redirect::to(&format!("/incident/{id}")).into_response()
         }
         Ok(false) => failure(StatusCode::NOT_FOUND, "инцидент не найден"),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Reply {
+    answer: String,
+}
+
+/// Ответ дежурного на заявку. Пустой ответ снимает её: сказать «нечем» — тоже
+/// ответ, и он лучше молчания, потому что возвращает инцидент в работу.
+async fn answer(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(given): Form<Reply>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let now = Minute::of(Utc::now());
+    let text = given.answer.trim();
+    let done = if text.is_empty() {
+        shared.store.shush(id, &who, now).await
+    } else {
+        shared.store.reply(id, &who, text, now).await
+    };
+    match done {
+        Ok(Some(incident)) => {
+            if !text.is_empty() {
+                shared.metrics.answered();
+            }
+            tracing::info!(
+                inquiry = id,
+                who,
+                dropped = text.is_empty(),
+                "заявка закрыта"
+            );
+            Redirect::to(&format!("/incident/{incident}")).into_response()
+        }
+        Ok(None) => failure(StatusCode::NOT_FOUND, "заявка не найдена или уже закрыта"),
         Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
     }
 }

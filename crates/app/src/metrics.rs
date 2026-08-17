@@ -21,6 +21,8 @@ pub struct Metrics {
     sifted: AtomicU64,
     concluded: AtomicU64,
     skipped: AtomicU64,
+    inquiries: AtomicU64,
+    answered: AtomicU64,
 }
 
 impl Metrics {
@@ -36,6 +38,8 @@ impl Metrics {
             sifted: AtomicU64::new(0),
             concluded: AtomicU64::new(0),
             skipped: AtomicU64::new(0),
+            inquiries: AtomicU64::new(0),
+            answered: AtomicU64::new(0),
         }
     }
 
@@ -68,6 +72,16 @@ impl Metrics {
     /// Отмечает инцидент, дошедший до дежурного без вывода.
     pub fn skipped(&self) {
         self.skipped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Отмечает оставленную дежурному заявку.
+    pub fn inquiry(&self) {
+        self.inquiries.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Отмечает заявку, на которую дежурный ответил.
+    pub fn answered(&self) {
+        self.answered.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Отмечает отказ источника или модели.
@@ -133,6 +147,18 @@ impl Metrics {
             "sre_skipped_total",
             "Инциденты, дошедшие до дежурного без вывода",
             &self.skipped.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            &mut out,
+            "sre_inquiries_total",
+            "Заявки, оставленные дежурному",
+            &self.inquiries.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            &mut out,
+            "sre_inquiries_answered_total",
+            "Заявки, на которые дежурный ответил",
+            &self.answered.load(Ordering::Relaxed).to_string(),
         );
         counter(
             &mut out,
