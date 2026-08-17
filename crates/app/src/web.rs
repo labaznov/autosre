@@ -106,7 +106,12 @@ async fn feed(State(shared): State<Shared>, headers: HeaderMap) -> Response {
             let mut cards = Vec::with_capacity(incidents.len());
             for incident in incidents {
                 let related = shared.store.related(incident.id).await.unwrap_or_default();
-                cards.push(Card::of(incident, related));
+                let finding = shared
+                    .store
+                    .conclusion(incident.id)
+                    .await
+                    .unwrap_or_default();
+                cards.push(Card::of(incident, related, finding.as_ref()));
             }
             render(&Feed {
                 incidents: cards,
@@ -126,8 +131,9 @@ async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i
         Ok(incidents) => match incidents.into_iter().find(|it| it.id == id) {
             Some(incident) => {
                 let related = shared.store.related(id).await.unwrap_or_default();
+                let finding = shared.store.conclusion(id).await.unwrap_or_default();
                 render(&Single {
-                    incident: Card::of(incident, related),
+                    incident: Card::of(incident, related, finding.as_ref()),
                     who,
                 })
             }

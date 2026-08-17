@@ -22,6 +22,8 @@
       <span class="stamp">{{ incident.began }} · {{ incident.alive }}</span>
     </header>
     <p class="signature">{{ incident.signature }}</p>
+    {% if let Some(cause) = incident.cause %}<p class="cause">{{ cause }}</p>{% endif %}
+    {% if let Some(missing) = incident.missing %}<p class="missing">{{ missing }}</p>{% endif %}
     <p class="numbers">
       пик {{ incident.peak }} за окно · подтверждений {{ incident.seen }} ·
       вес {{ incident.weight }}

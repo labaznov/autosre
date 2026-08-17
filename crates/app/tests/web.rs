@@ -358,3 +358,53 @@ async fn keeps_the_verdict_from_a_stranger() {
         .expect("запрос не дошёл");
     assert_eq!(answer.status(), 303);
 }
+
+#[tokio::test]
+async fn shows_the_conclusion_on_the_card() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let dig = agent
+        .store
+        .dig(id, "error-burst", sre_domain::Minute::at(1_786_968_660))
+        .await
+        .unwrap();
+    agent
+        .store
+        .conclude(
+            dig,
+            "апстрим перестал отвечать после выката",
+            0.7,
+            "проверить откат апстрима",
+            sre_domain::Minute::at(1_786_968_720),
+        )
+        .await
+        .unwrap();
+    let cookie = agent.enter("duty", SECRET).await.unwrap();
+    let page = agent
+        .inside(&format!("/incident/{id}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("апстрим перестал отвечать после выката"));
+}
+
+#[tokio::test]
+async fn says_plainly_when_the_queue_did_not_reach() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let dig = agent
+        .store
+        .dig(id, "—", sre_domain::Minute::at(1_786_968_660))
+        .await
+        .unwrap();
+    agent.store.drop_dig(dig, "skipped").await.unwrap();
+    let cookie = agent.enter("duty", SECRET).await.unwrap();
+    let page = agent
+        .inside(&format!("/incident/{id}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("вывод пропущен"));
+}

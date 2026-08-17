@@ -72,6 +72,16 @@ link = "5m"
 backfill = "2h"
 chunk = "1h"
 
+[digging]
+# Каталог скиллов в рабочей копии репозитория знаний.
+skills = "/knowledge/skills"
+parallel = 2
+# Сколько раз модель может попросить добрать данные.
+steps = 3
+wider = "1h"
+# Сколько инцидент ждёт разбора, прежде чем дойти до дежурного без вывода.
+patience = "15m"
+
 [queue]
 parallel = 2
 patience = "15m"

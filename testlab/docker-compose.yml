@@ -62,6 +62,7 @@ services:
       - "8096:8096"
     volumes:
       - ./sreagent.toml:/etc/sreagent/sreagent.toml:ro
+      - ../examples/knowledge:/knowledge:ro
       - agent:/opt/data/sreagent
     depends_on:
       - victorialogs

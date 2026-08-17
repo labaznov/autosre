@@ -149,18 +149,17 @@ async fn messages(source: &dyn Source, deviation: &Deviation, settings: &Inciden
 /// Сигнатура самой частой ошибки окна.
 ///
 /// Образцов может не быть вовсе: у метрик их нет по природе, а логи могли
-/// уехать по retention. Тогда сигнатурой становится сама серия или горизонт —
-/// беда должна дойти до дежурного, пусть и без узнаваемого имени.
+/// уехать по retention. Тогда сигнатурой становится имя серии — оно и есть то,
+/// что дежурный назовёт вслух.
+///
+/// Собирается напрямую, а не через маскирование: там числа заменяются
+/// заглушками, и «15m» превращается в «<n>m» — имя, которого никто не поймёт.
 fn pick(groups: &[sre_domain::Group], deviation: &Deviation) -> Signature {
-    groups.first().map_or_else(
-        || {
-            Signature::of(&format!(
-                "{} на горизонте {}",
-                deviation.source, deviation.horizon
-            ))
-        },
-        |group| group.signature.clone(),
-    )
+    if let Some(group) = groups.first() {
+        return group.signature.clone();
+    }
+    let series = Service::of(&deviation.stream, &["__series__".to_owned()]);
+    Signature::stored(format!("{series} на горизонте {}", deviation.horizon))
 }
 
 /// Закрывает инциденты, о которых давно нет вестей.

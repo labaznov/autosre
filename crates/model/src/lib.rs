@@ -52,6 +52,20 @@ pub struct Triage {
     pub because: String,
 }
 
+/// Вывод расследования.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Conclusion {
+    /// Версия причины.
+    pub cause: String,
+    /// Насколько модель себе верит, от нуля до единицы.
+    pub confidence: f64,
+    /// Куда смотреть дежурному.
+    pub advice: String,
+    /// Чего не хватило: `logs`, `metrics`, `neighbours` или `nothing`.
+    #[serde(default)]
+    pub need: Option<String>,
+}
+
 /// Клиент модели.
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -91,6 +105,15 @@ impl Model {
     /// [`ModelError`] при недоступности модели или ответе мимо схемы.
     pub async fn triage(&self, about: &str) -> Result<Triage, ModelError> {
         self.ask(prompt::SIFTER, about, schema::triage()).await
+    }
+
+    /// Разбор всплеска: причина, уверенность, рекомендация.
+    ///
+    /// # Errors
+    /// [`ModelError`] при недоступности модели или ответе мимо схемы.
+    pub async fn conclude(&self, skill: &str, dossier: &str) -> Result<Conclusion, ModelError> {
+        let system = format!("{}\n\n{skill}", prompt::ANALYST);
+        self.ask(&system, dossier, schema::conclusion()).await
     }
 
     /// Один заход в модель со схемой ответа.

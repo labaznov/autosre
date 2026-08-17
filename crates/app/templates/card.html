@@ -20,6 +20,20 @@
 
   <p class="signature">{{ incident.signature }}</p>
 
+  {% if let Some(cause) = incident.cause %}
+    <section class="conclusion">
+      <h2>Вывод</h2>
+      <p>{{ cause }}</p>
+      {% if let Some(advice) = incident.advice %}<p><b>Куда смотреть:</b> {{ advice }}</p>{% endif %}
+      <p class="stamp">
+        {% if let Some(confidence) = incident.confidence %}уверенность {{ confidence }}{% endif %}
+        {% if let Some(skill) = incident.skill %} · скилл {{ skill }}{% endif %}
+      </p>
+    </section>
+  {% else if let Some(missing) = incident.missing %}
+    <p class="missing">{{ missing }}. Числа выше — всё, что есть.</p>
+  {% endif %}
+
   {% if let Some(because) = incident.because %}
     <p class="because">Отсев решил разбираться: {{ because }}</p>
   {% endif %}

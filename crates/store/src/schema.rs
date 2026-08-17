@@ -114,4 +114,32 @@ pub const STEPS: &[&str] = &[
     ALTER TABLE deviations ADD COLUMN sifted TEXT;
     ALTER TABLE incidents ADD COLUMN because TEXT;
     ",
+    // 6. Расследования и их шаги.
+    //
+    // Шаг — строка в базе, а не переменная в памяти: убитый на середине агент
+    // должен знать, где остановился ([ADR-0021](../../../docs/adr/0021-state-survives-restart.md)).
+    "
+    CREATE TABLE IF NOT EXISTS investigations (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident   INTEGER NOT NULL,
+        skill      TEXT    NOT NULL,
+        state      TEXT    NOT NULL,
+        started    INTEGER NOT NULL,
+        finished   INTEGER,
+        cause      TEXT,
+        confidence REAL,
+        advice     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS investigations_incident ON investigations (incident);
+    CREATE INDEX IF NOT EXISTS investigations_state ON investigations (state);
+
+    CREATE TABLE IF NOT EXISTS steps (
+        investigation INTEGER NOT NULL,
+        ord           INTEGER NOT NULL,
+        tool          TEXT    NOT NULL,
+        about         TEXT    NOT NULL,
+        data          TEXT    NOT NULL,
+        PRIMARY KEY (investigation, ord)
+    ) WITHOUT ROWID;
+    ",
 ];

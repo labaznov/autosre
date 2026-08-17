@@ -6,6 +6,7 @@
 
 use chrono::{TimeZone, Utc};
 use sre_domain::{Incident, Minute, State};
+use sre_store::Finding;
 
 /// Инцидент в том виде, в каком его читает человек.
 pub struct Card {
@@ -25,11 +26,18 @@ pub struct Card {
     pub verdict: Option<bool>,
     pub because: Option<String>,
     pub related: Vec<i64>,
+    /// Вывод расследования, если он уже есть.
+    pub cause: Option<String>,
+    pub advice: Option<String>,
+    pub confidence: Option<String>,
+    pub skill: Option<String>,
+    /// Разбор не состоялся: очередь не дошла или модель отказала.
+    pub missing: Option<&'static str>,
 }
 
 impl Card {
     #[must_use]
-    pub fn of(incident: Incident, related: Vec<i64>) -> Self {
+    pub fn of(incident: Incident, related: Vec<i64>, finding: Option<&Finding>) -> Self {
         Self {
             id: incident.id,
             service: incident.service.to_string(),
@@ -51,6 +59,19 @@ impl Card {
             verdict: incident.verdict,
             because: incident.because,
             related,
+            cause: finding.and_then(|it| it.cause.clone()),
+            advice: finding.and_then(|it| it.advice.clone()),
+            confidence: finding
+                .and_then(|it| it.confidence)
+                .map(|it| format!("{:.0}%", it * 100.0)),
+            skill: finding.map(|it| it.skill.clone()),
+            missing: finding.and_then(|it| match it.state.as_str() {
+                "skipped" => Some("вывод пропущен: очередь не дошла вовремя"),
+                "failed" => Some("разбор не удался: модель не ответила"),
+                "stale" => Some("разбор устарел и был закрыт"),
+                "running" => Some("разбор идёт"),
+                _ => None,
+            }),
         }
     }
 }

@@ -31,6 +31,17 @@ pub enum StoreError {
     Task(#[from] task::JoinError),
 }
 
+/// Вывод расследования в том виде, в каком его читают.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Finding {
+    pub id: i64,
+    pub skill: String,
+    pub state: String,
+    pub cause: Option<String>,
+    pub confidence: Option<f64>,
+    pub advice: Option<String>,
+}
+
 /// База наблюдений.
 #[derive(Debug, Clone)]
 pub struct Store {
@@ -467,6 +478,184 @@ impl Store {
         .await
     }
 
+    /// Инциденты, ждущие разбора: открытые, без расследования, самые тяжёлые
+    /// первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn awaiting(&self, limit: usize) -> Result<Vec<Incident>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, service, signature, stream, source, state, began, last,
+                        seen, peak, weight, verdict, because
+                   FROM incidents
+                  WHERE state = 'open'
+                    AND id NOT IN (SELECT incident FROM investigations)
+                  ORDER BY weight DESC, id ASC LIMIT ?1",
+            )?;
+            let rows = query.query_map(params![limit], read_incident)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Заводит расследование инцидента.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn dig(&self, incident: i64, skill: &str, at: Minute) -> Result<i64, StoreError> {
+        let skill = skill.to_owned();
+        self.work(move |db| {
+            db.execute(
+                "INSERT INTO investigations (incident, skill, state, started)
+                 VALUES (?1, ?2, 'running', ?3)",
+                params![incident, skill, at.stamp()],
+            )?;
+            Ok(db.last_insert_rowid())
+        })
+        .await
+    }
+
+    /// Записывает шаг расследования сразу, как он сделан.
+    ///
+    /// По шагу за раз, а не пачкой в конце: убитый на середине агент должен
+    /// знать, где остановился.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn step(
+        &self,
+        investigation: i64,
+        ord: usize,
+        tool: &str,
+        about: &str,
+        data: &str,
+    ) -> Result<(), StoreError> {
+        let (tool, about, data) = (tool.to_owned(), about.to_owned(), data.to_owned());
+        let ord = i64::try_from(ord).unwrap_or(0);
+        self.work(move |db| {
+            db.execute(
+                "INSERT OR REPLACE INTO steps (investigation, ord, tool, about, data)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![investigation, ord, tool, about, data],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Заканчивает расследование выводом.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn conclude(
+        &self,
+        investigation: i64,
+        cause: &str,
+        confidence: f64,
+        advice: &str,
+        at: Minute,
+    ) -> Result<(), StoreError> {
+        let (cause, advice) = (cause.to_owned(), advice.to_owned());
+        self.work(move |db| {
+            db.execute(
+                "UPDATE investigations
+                    SET state = 'done', finished = ?2, cause = ?3, confidence = ?4, advice = ?5
+                  WHERE id = ?1",
+                params![investigation, at.stamp(), cause, confidence, advice],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Помечает расследование неудавшимся или брошенным.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn drop_dig(&self, investigation: i64, state: &str) -> Result<(), StoreError> {
+        let state = state.to_owned();
+        self.work(move |db| {
+            db.execute(
+                "UPDATE investigations SET state = ?2 WHERE id = ?1",
+                params![investigation, state],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Вывод расследования инцидента, если он есть.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn conclusion(&self, incident: i64) -> Result<Option<Finding>, StoreError> {
+        self.work(move |db| {
+            Ok(db
+                .query_row(
+                    "SELECT id, skill, state, cause, confidence, advice
+                       FROM investigations WHERE incident = ?1
+                      ORDER BY id DESC LIMIT 1",
+                    params![incident],
+                    |row| {
+                        Ok(Finding {
+                            id: row.get(0)?,
+                            skill: row.get(1)?,
+                            state: row.get(2)?,
+                            cause: row.get(3)?,
+                            confidence: row.get(4)?,
+                            advice: row.get(5)?,
+                        })
+                    },
+                )
+                .optional()?)
+        })
+        .await
+    }
+
+    /// Расследования, оборвавшиеся на середине.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn unfinished(&self) -> Result<Vec<(i64, i64, String, Minute)>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, incident, skill, started FROM investigations
+                  WHERE state = 'running' ORDER BY id",
+            )?;
+            let rows = query.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    Minute::at(row.get(3)?),
+                ))
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Шаги расследования по порядку.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn steps(
+        &self,
+        investigation: i64,
+    ) -> Result<Vec<(String, String, String)>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT tool, about, data FROM steps WHERE investigation = ?1 ORDER BY ord",
+            )?;
+            let rows = query.query_map(params![investigation], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
     /// Закрывает инциденты, о которых давно нет вестей.
     ///
     /// # Errors
@@ -525,23 +714,7 @@ impl Store {
                   WHERE (?1 = 0 OR state = 'open')
                   ORDER BY last DESC, id DESC LIMIT ?2",
             )?;
-            let rows = query.query_map(params![i64::from(open), limit], |row| {
-                Ok(Incident {
-                    id: row.get(0)?,
-                    service: Service::new(row.get::<_, String>(1)?),
-                    signature: Signature::stored(row.get::<_, String>(2)?),
-                    stream: Stream::new(row.get::<_, String>(3)?),
-                    source: row.get(4)?,
-                    state: State::of(&row.get::<_, String>(5)?),
-                    began: Minute::at(row.get(6)?),
-                    last: Minute::at(row.get(7)?),
-                    seen: row.get(8)?,
-                    peak: row.get(9)?,
-                    weight: row.get(10)?,
-                    verdict: row.get::<_, Option<i64>>(11)?.map(|it| it == 1),
-                    because: row.get(12)?,
-                })
-            })?;
+            let rows = query.query_map(params![i64::from(open), limit], read_incident)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
         .await
@@ -760,6 +933,25 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
         tracing::info!(step = number + 1, "схема базы обновлена");
     }
     Ok(())
+}
+
+/// Инцидент из строки таблицы.
+fn read_incident(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
+    Ok(Incident {
+        id: row.get(0)?,
+        service: Service::new(row.get::<_, String>(1)?),
+        signature: Signature::stored(row.get::<_, String>(2)?),
+        stream: Stream::new(row.get::<_, String>(3)?),
+        source: row.get(4)?,
+        state: State::of(&row.get::<_, String>(5)?),
+        began: Minute::at(row.get(6)?),
+        last: Minute::at(row.get(7)?),
+        seen: row.get(8)?,
+        peak: row.get(9)?,
+        weight: row.get(10)?,
+        verdict: row.get::<_, Option<i64>>(11)?.map(|it| it == 1),
+        because: row.get(12)?,
+    })
 }
 
 /// Бесконечная оценка со знаком: в базе она пустая, а направление видно по

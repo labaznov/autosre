@@ -19,6 +19,8 @@ pub struct Metrics {
     deviations: AtomicU64,
     incidents: AtomicU64,
     sifted: AtomicU64,
+    concluded: AtomicU64,
+    skipped: AtomicU64,
 }
 
 impl Metrics {
@@ -32,6 +34,8 @@ impl Metrics {
             deviations: AtomicU64::new(0),
             incidents: AtomicU64::new(0),
             sifted: AtomicU64::new(0),
+            concluded: AtomicU64::new(0),
+            skipped: AtomicU64::new(0),
         }
     }
 
@@ -54,6 +58,16 @@ impl Metrics {
     /// Отмечает отклонение, отсеянное как привычный шум.
     pub fn sifted(&self) {
         self.sifted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Отмечает готовый вывод расследования.
+    pub fn concluded(&self) {
+        self.concluded.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Отмечает инцидент, дошедший до дежурного без вывода.
+    pub fn skipped(&self) {
+        self.skipped.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Отмечает отказ источника или модели.
@@ -107,6 +121,18 @@ impl Metrics {
             "sre_sifted_total",
             "Отклонения, отсеянные как привычный шум",
             &self.sifted.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            &mut out,
+            "sre_conclusions_total",
+            "Готовые выводы расследований",
+            &self.concluded.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            &mut out,
+            "sre_skipped_total",
+            "Инциденты, дошедшие до дежурного без вывода",
+            &self.skipped.load(Ordering::Relaxed).to_string(),
         );
         counter(
             &mut out,

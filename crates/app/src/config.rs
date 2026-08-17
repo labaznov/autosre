@@ -101,6 +101,8 @@ pub struct File {
     #[serde(default)]
     pub incidents: Incidents,
     #[serde(default)]
+    pub digging: Digging,
+    #[serde(default)]
     pub queue: Queue,
     #[serde(default)]
     pub retention: Retention,
@@ -228,6 +230,31 @@ pub struct Incidents {
     rest: BTreeMap<String, toml::Value>,
 }
 
+/// Разбор: очередь, глубина, каталог скиллов.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Digging {
+    /// Каталог скиллов в рабочей копии репозитория знаний.
+    #[serde(default = "default_skills")]
+    pub skills: PathBuf,
+    /// Сколько расследований идёт одновременно.
+    #[serde(default = "default_parallel")]
+    pub parallel: usize,
+    /// Сколько инцидентов брать за проход очереди.
+    #[serde(default = "default_batch")]
+    pub batch: usize,
+    /// Сколько раз модель может попросить добрать данные.
+    #[serde(default = "default_steps")]
+    pub steps: usize,
+    /// За какое окно добирать данные по просьбе модели.
+    #[serde(default = "default_wider", with = "humantime_serde")]
+    pub wider: Duration,
+    /// Сколько инцидент ждёт разбора, прежде чем дойти до дежурного без вывода.
+    #[serde(default = "default_patience", with = "humantime_serde")]
+    pub patience: Duration,
+    #[serde(flatten)]
+    rest: BTreeMap<String, toml::Value>,
+}
+
 /// Очередь расследований.
 #[derive(Debug, Deserialize)]
 pub struct Queue {
@@ -310,7 +337,7 @@ impl File {
                 "размер куска дозапроса равен нулю: просить будет нечего".to_owned(),
             ));
         }
-        if self.queue.parallel == 0 {
+        if self.digging.parallel == 0 || self.queue.parallel == 0 {
             return Err(ConfigError::Invalid(
                 "потолок одновременных расследований равен нулю: разбирать будет некому".to_owned(),
             ));
@@ -327,6 +354,7 @@ impl File {
         collect("model", &self.model.rest, &mut found);
         collect("collector", &self.collector.rest, &mut found);
         collect("incidents", &self.incidents.rest, &mut found);
+        collect("digging", &self.digging.rest, &mut found);
         collect("queue", &self.queue.rest, &mut found);
         collect("retention", &self.retention.rest, &mut found);
         for horizon in &self.horizons {
@@ -376,6 +404,29 @@ impl Default for Incidents {
             sample_window: default_sample_window(),
             silence: default_silence(),
             link: default_link(),
+            rest: BTreeMap::new(),
+        }
+    }
+}
+
+impl Digging {
+    /// Те же настройки, но с другим терпением: очередь проверяется на обоих
+    /// краях — успели и не успели.
+    #[must_use]
+    pub fn patient(self, patience: Duration) -> Self {
+        Self { patience, ..self }
+    }
+}
+
+impl Default for Digging {
+    fn default() -> Self {
+        Self {
+            skills: default_skills(),
+            parallel: default_parallel(),
+            batch: default_batch(),
+            steps: default_steps(),
+            wider: default_wider(),
+            patience: default_patience(),
             rest: BTreeMap::new(),
         }
     }
@@ -483,6 +534,15 @@ fn default_chunk() -> Duration {
 }
 fn default_drift() -> f64 {
     0.15
+}
+fn default_skills() -> PathBuf {
+    PathBuf::from("/opt/data/sreagent/knowledge/skills")
+}
+fn default_steps() -> usize {
+    3
+}
+fn default_wider() -> Duration {
+    Duration::from_hours(1)
 }
 fn default_parallel() -> usize {
     4

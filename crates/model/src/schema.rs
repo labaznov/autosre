@@ -23,6 +23,32 @@ pub fn triage() -> Value {
     )
 }
 
+/// Схема вывода расследования.
+///
+/// `need` — просьба добрать данные. Меню закрытое: выдумать инструмент модель
+/// не может, а неизвестное имя — отказ шага, а не расследования
+/// ([ADR-0002](../../../docs/adr/0002-bounded-tools.md)).
+#[must_use]
+pub fn conclusion() -> Value {
+    object(
+        "conclusion",
+        &json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cause", "confidence", "advice"],
+            "properties": {
+                "cause": {"type": "string", "maxLength": 600},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "advice": {"type": "string", "maxLength": 400},
+                "need": {
+                    "type": "string",
+                    "enum": ["logs", "metrics", "neighbours", "nothing"]
+                }
+            }
+        }),
+    )
+}
+
 /// Оборачивает схему в `response_format`, понятный OpenAI-совместимому API.
 fn object(name: &str, schema: &Value) -> Value {
     json!({

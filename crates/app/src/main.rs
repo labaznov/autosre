@@ -7,7 +7,7 @@ use std::sync::Arc;
 use sre_app::config::{Config, Process};
 use sre_app::metrics::Metrics;
 use sre_app::session::Doorman;
-use sre_app::{VERSION, collector, grouper, watcher, web};
+use sre_app::{VERSION, collector, digger, grouper, watcher, web};
 use sre_logs::{Filter, Logs};
 use sre_source::Source;
 use sre_store::Store;
@@ -119,6 +119,25 @@ async fn serve() -> Result<(), Failure> {
         timeout: config.file.model.timeout,
     })?);
     grouper::group(&sources, &store, &metrics, &model, &config.file.incidents);
+
+    let skills = sre_skills::read(&config.file.digging.skills).unwrap_or_else(|failure| {
+        tracing::warn!(
+            path = %config.file.digging.skills.display(),
+            %failure,
+            "скиллы не прочитаны: разбирать будет нечем"
+        );
+        Vec::new()
+    });
+    tracing::info!(skills = skills.len(), "скиллы загружены");
+    digger::dig(digger::Digger::new(
+        &sources,
+        &store,
+        &metrics,
+        &model,
+        skills,
+        &config.file.digging,
+        &config.file.incidents,
+    ));
 
     let doorman = Doorman::new(config.file.accounts.clone(), &config.secrets.session);
     if doorman.empty() {
