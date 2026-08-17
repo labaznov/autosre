@@ -97,4 +97,12 @@ pub const STEPS: &[&str] = &[
 
     ALTER TABLE deviations ADD COLUMN incident INTEGER;
     ",
+    // 4. Кто поставил оценку и когда.
+    //
+    // Имя, а не «дежурный»: на подписи держится вся ценность обратной связи.
+    // Разбирать через месяц, кто и почему счёл находку ложной, придётся всерьёз.
+    "
+    ALTER TABLE incidents ADD COLUMN judge TEXT;
+    ALTER TABLE incidents ADD COLUMN judged INTEGER;
+    ",
 ];

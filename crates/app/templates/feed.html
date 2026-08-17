@@ -25,6 +25,9 @@
     <p class="numbers">
       пик {{ incident.peak }} за окно · подтверждений {{ incident.seen }} ·
       вес {{ incident.weight }}
+      {% if let Some(useful) = incident.verdict %}
+        · {% if useful %}по делу{% else %}ложный{% endif %}
+      {% endif %}
       {% if !incident.related.is_empty() %}
         · рядом:
         {% for other in incident.related %}<a href="/incident/{{ other }}">#{{ other }}</a>{% endfor %}

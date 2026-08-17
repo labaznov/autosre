@@ -116,3 +116,33 @@ pub struct Incident {
     /// Оценка дежурного: по делу или ложный.
     pub verdict: Option<bool>,
 }
+
+/// Счёт инцидентов и оценок — основание метрик приёмки.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Tally {
+    pub total: u64,
+    pub useful: u64,
+    pub useless: u64,
+    pub open: u64,
+}
+
+impl Tally {
+    /// Доля ложных среди оценённых; `None`, пока никто не оценивал.
+    ///
+    /// Считается по оценённым, а не по всем: неоценённый инцидент не говорит
+    /// ни за, ни против, и включать его в знаменатель значит выдавать
+    /// нерасторопность дежурного за качество агента.
+    #[must_use]
+    pub fn wrong(&self) -> Option<f64> {
+        let judged = self.useful + self.useless;
+        (judged > 0).then(|| ratio(self.useless) / ratio(judged))
+    }
+}
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "число инцидентов далеко ниже предела точности f64"
+)]
+fn ratio(count: u64) -> f64 {
+    count as f64
+}

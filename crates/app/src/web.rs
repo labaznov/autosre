@@ -12,7 +12,9 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use chrono::Utc;
 use serde::Deserialize;
+use sre_domain::Minute;
 use sre_store::Store;
 
 use crate::metrics::Metrics;
@@ -58,6 +60,8 @@ pub fn routes(shared: Shared) -> Router {
     Router::new()
         .route("/", get(feed))
         .route("/incident/{id}", get(card))
+        .route("/incident/{id}/verdict", post(verdict))
+        .route("/api/metrics", get(quality))
         .route("/login", get(door).post(enter))
         .route("/logout", post(leave))
         .route("/static/style.css", get(style))
@@ -129,6 +133,51 @@ async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i
             }
             None => failure(StatusCode::NOT_FOUND, "инцидент не найден"),
         },
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Judgement {
+    useful: String,
+}
+
+/// Оценка инцидента дежурным — единственный источник метрики точности.
+async fn verdict(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(given): Form<Judgement>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let useful = given.useful == "yes";
+    match shared
+        .store
+        .judge(id, useful, &who, Minute::of(Utc::now()))
+        .await
+    {
+        Ok(true) => {
+            tracing::info!(incident = id, useful, who, "инцидент оценён");
+            Redirect::to(&format!("/incident/{id}")).into_response()
+        }
+        Ok(false) => failure(StatusCode::NOT_FOUND, "инцидент не найден"),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+/// Метрики качества: доля ложных считается по оценённым, а не по всем.
+async fn quality(State(shared): State<Shared>) -> Response {
+    match shared.store.tally().await {
+        Ok(tally) => Json(serde_json::json!({
+            "incidents": tally.total,
+            "open": tally.open,
+            "useful": tally.useful,
+            "useless": tally.useless,
+            "wrong": tally.wrong(),
+        }))
+        .into_response(),
         Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
     }
 }

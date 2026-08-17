@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use sre_domain::{
-    Bucket, Deviation, Hour, Incident, Minute, Service, Signature, Span, State, Stream,
+    Bucket, Deviation, Hour, Incident, Minute, Service, Signature, Span, State, Stream, Tally,
 };
 use tokio::task;
 
@@ -508,6 +508,53 @@ impl Store {
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Записывает оценку дежурного; отвечает, нашёлся ли инцидент.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn judge(
+        &self,
+        incident: i64,
+        useful: bool,
+        who: &str,
+        when: Minute,
+    ) -> Result<bool, StoreError> {
+        let who = who.to_owned();
+        self.work(move |db| {
+            Ok(db.execute(
+                "UPDATE incidents SET verdict = ?2, judge = ?3, judged = ?4 WHERE id = ?1",
+                params![incident, i64::from(useful), who, when.stamp()],
+            )? > 0)
+        })
+        .await
+    }
+
+    /// Счёт оценённых инцидентов — основание метрики точности.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn tally(&self) -> Result<Tally, StoreError> {
+        self.work(move |db| {
+            Ok(db.query_row(
+                "SELECT COUNT(*),
+                        COALESCE(SUM(verdict = 1), 0),
+                        COALESCE(SUM(verdict = 0), 0),
+                        COALESCE(SUM(state = 'open'), 0)
+                   FROM incidents",
+                [],
+                |row| {
+                    Ok(Tally {
+                        total: row.get(0)?,
+                        useful: row.get(1)?,
+                        useless: row.get(2)?,
+                        open: row.get(3)?,
+                    })
+                },
+            )?)
         })
         .await
     }

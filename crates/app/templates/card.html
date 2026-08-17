@@ -31,6 +31,20 @@
     <dt>Поток</dt><dd><code>{{ incident.stream }}</code></dd>
   </dl>
 
+  <footer class="verdict">
+    {% if let Some(useful) = incident.verdict %}
+      {% if useful %}<span class="judged">по делу</span>
+      {% else %}<span class="judged">ложный</span>{% endif %}
+    {% else %}
+      <form method="post" action="/incident/{{ incident.id }}/verdict">
+        <input type="hidden" name="useful" value="yes"><button>по делу</button>
+      </form>
+      <form method="post" action="/incident/{{ incident.id }}/verdict">
+        <input type="hidden" name="useful" value="no"><button>ложный</button>
+      </form>
+    {% endif %}
+  </footer>
+
   {% if !incident.related.is_empty() %}
     <p class="related">
       Началось рядом во времени:

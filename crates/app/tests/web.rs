@@ -92,6 +92,17 @@ impl Agent {
             .filter(|cookie| !cookie.starts_with("sreagent=;"))
     }
 
+    /// Ставит оценку инциденту.
+    async fn judge(&self, id: i64, useful: &str, cookie: &str) {
+        Self::client()
+            .post(self.at(&format!("/incident/{id}/verdict")))
+            .header("cookie", cookie)
+            .form(&[("useful", useful)])
+            .send()
+            .await
+            .expect("запрос не дошёл");
+    }
+
     async fn inside(&self, path: &str, cookie: &str) -> reqwest::Response {
         Self::client()
             .get(self.at(path))
@@ -289,4 +300,60 @@ async fn keeps_the_card_from_a_stranger() {
     let agent = Agent::start().await;
     let id = incident(&agent).await;
     assert_eq!(agent.get(&format!("/incident/{id}")).await.status(), 303);
+}
+
+#[tokio::test]
+async fn takes_the_verdict_of_the_duty_engineer() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent.enter("duty", SECRET).await.unwrap();
+    agent.judge(id, "no", &cookie).await;
+    let quality: serde_json::Value = agent.get("/api/metrics").await.json().await.unwrap();
+    assert_eq!(quality["useless"], 1);
+}
+
+#[tokio::test]
+async fn counts_the_wrong_share_over_the_judged() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent.enter("duty", SECRET).await.unwrap();
+    agent.judge(id, "no", &cookie).await;
+    let quality: serde_json::Value = agent.get("/api/metrics").await.json().await.unwrap();
+    assert_eq!(quality["wrong"], 1.0);
+}
+
+#[tokio::test]
+async fn knows_no_share_before_the_first_verdict() {
+    let agent = Agent::start().await;
+    incident(&agent).await;
+    let quality: serde_json::Value = agent.get("/api/metrics").await.json().await.unwrap();
+    assert!(quality["wrong"].is_null());
+}
+
+#[tokio::test]
+async fn shows_the_verdict_on_the_card() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent.enter("duty", SECRET).await.unwrap();
+    agent.judge(id, "yes", &cookie).await;
+    let page = agent
+        .inside(&format!("/incident/{id}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("по делу"));
+}
+
+#[tokio::test]
+async fn keeps_the_verdict_from_a_stranger() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let answer = Agent::client()
+        .post(agent.at(&format!("/incident/{id}/verdict")))
+        .form(&[("useful", "no")])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert_eq!(answer.status(), 303);
 }
