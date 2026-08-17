@@ -1040,3 +1040,45 @@ async fn keeps_the_series_from_a_stranger() {
     let agent = Agent::start().await;
     assert_eq!(agent.get("/series").await.status(), 303);
 }
+
+#[tokio::test]
+async fn shows_how_long_it_took_to_notice() {
+    let agent = Agent::start().await;
+    agent.shared.metrics().detected(240);
+    let page = agent.get("/metrics").await.text().await.unwrap();
+    assert!(page.contains("sre_detection_seconds_bucket{le=\"300\"} 1"));
+}
+
+#[tokio::test]
+async fn leaves_a_slow_detection_out_of_the_quick_buckets() {
+    let agent = Agent::start().await;
+    agent.shared.metrics().detected(1200);
+    let page = agent.get("/metrics").await.text().await.unwrap();
+    assert!(page.contains("sre_detection_seconds_bucket{le=\"300\"} 0"));
+}
+
+#[tokio::test]
+async fn counts_every_detection_whatever_it_took() {
+    let agent = Agent::start().await;
+    for seconds in [30, 1200, 9000] {
+        agent.shared.metrics().detected(seconds);
+    }
+    let page = agent.get("/metrics").await.text().await.unwrap();
+    assert!(page.contains("sre_detection_seconds_count 3"));
+}
+
+#[tokio::test]
+async fn shows_how_long_it_took_to_explain() {
+    let agent = Agent::start().await;
+    agent.shared.metrics().explained(700);
+    let page = agent.get("/metrics").await.text().await.unwrap();
+    assert!(page.contains("sre_conclusion_seconds_bucket{le=\"900\"} 1"));
+}
+
+#[tokio::test]
+async fn drops_a_measurement_of_a_clock_that_went_backwards() {
+    let agent = Agent::start().await;
+    agent.shared.metrics().detected(-60);
+    let page = agent.get("/metrics").await.text().await.unwrap();
+    assert!(page.contains("sre_detection_seconds_count 0"));
+}

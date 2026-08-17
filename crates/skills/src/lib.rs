@@ -107,11 +107,7 @@ impl Skill {
     /// Подходит ли скилл этому отклонению.
     #[must_use]
     pub fn fits(&self, deviation: &Deviation) -> bool {
-        let signal = match deviation.source.as_str() {
-            "logs" => "errors",
-            other => other,
-        };
-        if self.front.when.signal != signal && self.front.when.signal != "any" {
+        if self.front.when.signal != signal(&deviation.source) && self.front.when.signal != "any" {
             return false;
         }
         if self.front.horizon != deviation.horizon {
@@ -126,6 +122,34 @@ impl Skill {
     #[must_use]
     pub fn unknown(&self) -> Vec<String> {
         self.front.rest.keys().cloned().collect()
+    }
+
+    /// Знает ли агент сигнал, на который написан скилл.
+    ///
+    /// Неизвестное слово в `when.signal` — это скилл, который не применится
+    /// никогда и никому об этом не скажет. Молчаливое несовпадение хуже отказа:
+    /// горизонт выглядит разобранным, а разбирать его нечем.
+    #[must_use]
+    pub fn heard(&self) -> bool {
+        SIGNALS.contains(&self.front.when.signal.as_str())
+    }
+}
+
+/// Сигналы, на которые пишут скиллы.
+///
+/// Единственное число, как и всё в [`NAMES.md`](../../../docs/NAMES.md):
+/// метрика одна, а ошибок много — отсюда `errors` рядом с `metric`.
+const SIGNALS: &[&str] = &["errors", "metric", "any"];
+
+/// Как источник наблюдения зовётся в скиллах.
+///
+/// Имена источников — внутреннее дело агента, имена сигналов — интерфейс с
+/// людьми ([`KNOWLEDGE.md`](../../../docs/KNOWLEDGE.md) §2). Отображение живёт
+/// в одном месте, чтобы они больше не разъезжались.
+fn signal(source: &str) -> &'static str {
+    match source {
+        "logs" => "errors",
+        _ => "metric",
     }
 }
 
@@ -148,6 +172,14 @@ pub fn read(directory: &Path) -> Result<Vec<Skill>, SkillError> {
             .and_then(|text| Skill::parse(&text))
         {
             Ok(skill) => {
+                if !skill.heard() {
+                    tracing::error!(
+                        skill = skill.front.name,
+                        signal = skill.front.when.signal,
+                        known = SIGNALS.join(", "),
+                        "сигнал скилла неизвестен агенту: скилл не применится ни разу"
+                    );
+                }
                 for field in skill.unknown() {
                     tracing::warn!(
                         skill = skill.front.name,

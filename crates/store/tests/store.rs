@@ -1603,3 +1603,102 @@ async fn counts_the_buckets_of_a_watched_stream() {
     }
     assert_eq!(base.store.series(10).await.unwrap()[0].buckets, 3);
 }
+
+/// Два числа с плавающей точкой, равные с точностью до счётной погрешности.
+fn same(left: f64, right: f64) -> bool {
+    (left - right).abs() < 0.001
+}
+
+/// Сутки минутных бакетов, свёрнутых в часы: так выглядит давняя история.
+async fn rolled(base: &Base, from: Minute, value: f64) {
+    for step in 0..(24 * 60) {
+        let at = from.back(-step);
+        base.store
+            .save(
+                "logs",
+                Span::single(at),
+                vec![Bucket::counted(wifi(), at, value)],
+            )
+            .await
+            .unwrap();
+    }
+    while base
+        .store
+        .roll("logs", from.back(-24 * 60))
+        .await
+        .unwrap()
+        .more
+    {}
+}
+
+#[tokio::test]
+async fn builds_a_window_out_of_rolled_hours() {
+    let base = Base::open();
+    let end = minute("2026-08-17T00:00:00Z");
+    rolled(&base, end.back(24 * 60), 2.0).await;
+    let windows = base.store.windows("logs", end, 24 * 60, 1).await.unwrap();
+    assert!(same(windows[&wifi()].1[0], 2880.0));
+}
+
+#[tokio::test]
+async fn counts_a_rolled_hour_as_sixty_snapped_minutes() {
+    let base = Base::open();
+    let end = minute("2026-08-17T00:00:00Z");
+    rolled(&base, end.back(24 * 60), 2.0).await;
+    assert_eq!(
+        base.store.covered("logs", end, 24 * 60, 1).await.unwrap()[0],
+        24 * 60
+    );
+}
+
+#[tokio::test]
+async fn adds_the_minutes_to_the_hours_of_the_same_window() {
+    let base = Base::open();
+    let end = minute("2026-08-17T02:00:00Z");
+    rolled(&base, end.back(26 * 60), 2.0).await;
+    for step in 0..120 {
+        let at = end.back(120).back(-step);
+        base.store
+            .save(
+                "logs",
+                Span::single(at),
+                vec![Bucket::counted(wifi(), at, 3.0)],
+            )
+            .await
+            .unwrap();
+    }
+    let windows = base.store.windows("logs", end, 26 * 60, 1).await.unwrap();
+    assert!(same(windows[&wifi()].1[0], 24.0 * 60.0 * 2.0 + 120.0 * 3.0));
+}
+
+#[tokio::test]
+async fn averages_a_level_across_minutes_and_hours_alike() {
+    let base = Base::open();
+    let end = minute("2026-08-17T02:00:00Z");
+    let start = end.back(3 * 60);
+    for step in 0..60 {
+        let at = start.back(-step);
+        base.store
+            .save(
+                "metrics",
+                Span::single(at),
+                vec![Bucket::level(wifi(), at, 10.0)],
+            )
+            .await
+            .unwrap();
+    }
+    base.store.roll("metrics", start.back(-60)).await.unwrap();
+    for step in 60..180 {
+        let at = start.back(-step);
+        base.store
+            .save(
+                "metrics",
+                Span::single(at),
+                vec![Bucket::level(wifi(), at, 40.0)],
+            )
+            .await
+            .unwrap();
+    }
+    let windows = base.store.windows("metrics", end, 3 * 60, 1).await.unwrap();
+    assert!(same(windows[&wifi()].1[0], 30.0));
+}

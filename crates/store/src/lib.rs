@@ -17,6 +17,39 @@ use sre_domain::{
 };
 use tokio::task;
 
+/// Сколько минут стоит за одним свёрнутым часом.
+const MINUTES: i64 = 60;
+
+/// Две половины окна: то, что взято из минут, и то, что из свёрнутых часов.
+///
+/// Считать их вместе одним выражением SQL нельзя: счётчик складывается, а
+/// уровень усредняется, и множитель у них разный.
+struct Parts {
+    /// Сумма значений и число минутных бакетов.
+    minutes: (f64, f64),
+    /// Сумма значений и число часовых бакетов.
+    hours: (f64, f64),
+}
+
+impl Parts {
+    /// Значение окна: счётчик складывается, уровень усредняется по минутам,
+    /// которые за значениями стоят. Час весит шестьдесят минут, минута — одну.
+    fn value(&self, kind: Kind) -> f64 {
+        let hour = f64::from(u32::try_from(MINUTES).unwrap_or(60));
+        match kind {
+            Kind::Sum => self.minutes.0 + self.hours.0,
+            Kind::Mean => {
+                let taken = self.minutes.1 + self.hours.1 * hour;
+                if taken > 0.0 {
+                    (self.minutes.0 + self.hours.0 * hour) / taken
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+}
+
 /// Предел ожидания на заблокированной базе.
 const BUSY_TIMEOUT: &str = "5000";
 
@@ -341,6 +374,13 @@ impl Store {
     /// ширин назад. Минуты без бакетов считаются нулями: их отсутствие в ряду
     /// означает тишину, а не незнание, потому что дыры закрывает дозапрос.
     ///
+    /// Окно собирается **из минут и часов сразу**. Минутные бакеты живут
+    /// неделю, часовые — год ([ADR-0022](../../../docs/adr/0022-retention.md)),
+    /// и суточному горизонту нужны обе половины: недавнее — по минутам,
+    /// давнее — по свёрнутым часам. Свежий край всегда минутный: свёртка
+    /// удаляет минуты только вместе с созданием часа, так что одно и то же
+    /// время не попадает в оба слагаемых.
+    ///
     /// # Errors
     /// [`StoreError::Sqlite`] на отказе чтения.
     pub async fn windows(
@@ -355,11 +395,23 @@ impl Store {
         let start = end.stamp() - seconds * i64::try_from(count).unwrap_or(24);
         self.work(move |db| {
             let mut query = db.prepare(
-                "SELECT stream, (?4 - at - 1) / ?5 AS window, kind,
-                        CASE kind WHEN 1 THEN AVG(value) ELSE SUM(value) END
-                   FROM buckets
-                  WHERE source = ?1 AND at >= ?2 AND at < ?3
-                  GROUP BY stream, window, kind",
+                "SELECT stream, window, kind,
+                        SUM(minute_value), SUM(minute_count),
+                        SUM(hour_value), SUM(hour_count)
+                   FROM (
+                     SELECT stream, (?4 - at - 1) / ?5 AS window, kind,
+                            SUM(value) AS minute_value, COUNT(*) AS minute_count,
+                            0.0 AS hour_value, 0 AS hour_count
+                       FROM buckets
+                      WHERE source = ?1 AND at >= ?2 AND at < ?3
+                      GROUP BY stream, window, kind
+                     UNION ALL
+                     SELECT stream, (?4 - at - 1) / ?5 AS window, kind,
+                            0.0, 0, SUM(value), COUNT(*)
+                       FROM hours
+                      WHERE source = ?1 AND at >= ?2 AND at < ?3
+                      GROUP BY stream, window, kind
+                 ) GROUP BY stream, window, kind",
             )?;
             let rows = query.query_map(
                 params![source, start, end.stamp(), end.stamp(), seconds],
@@ -367,21 +419,24 @@ impl Store {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, f64>(3)?,
+                        Kind::of(row.get::<_, i64>(2)?),
+                        Parts {
+                            minutes: (row.get::<_, f64>(3)?, row.get::<_, f64>(4)?),
+                            hours: (row.get::<_, f64>(5)?, row.get::<_, f64>(6)?),
+                        },
                     ))
                 },
             )?;
             let mut series: BTreeMap<Stream, (Kind, Vec<f64>)> = BTreeMap::new();
             for row in rows {
-                let (stream, index, kind, value) = row?;
+                let (stream, index, kind, parts) = row?;
                 let line = series
                     .entry(Stream::new(stream))
-                    .or_insert_with(|| (Kind::of(kind), vec![0.0; count]));
+                    .or_insert_with(|| (kind, vec![0.0; count]));
                 if let Ok(index) = usize::try_from(index)
                     && index < count
                 {
-                    line.1[index] = value;
+                    line.1[index] = parts.value(kind);
                 }
             }
             Ok(series)
@@ -394,6 +449,10 @@ impl Store {
     /// Отсутствие бакета и отсутствие данных — разные вещи. Без этой проверки
     /// пустая история читается как «ошибок не было», медиана выходит нулевой, и
     /// после каждого запуска агент находит отклонение в любом живом сервисе.
+    ///
+    /// Свёрнутый час считается за шестьдесят снятых минут: отметки минут живут
+    /// столько же, сколько минутные бакеты, и за их сроком единственное
+    /// свидетельство, что время снималось, — существование часа.
     ///
     /// # Errors
     /// [`StoreError::Sqlite`] на отказе чтения.
@@ -409,13 +468,21 @@ impl Store {
         let start = end.stamp() - seconds * i64::try_from(count).unwrap_or(24);
         self.work(move |db| {
             let mut query = db.prepare(
-                "SELECT (?4 - at - 1) / ?5 AS window, COUNT(*)
-                   FROM minutes
-                  WHERE source = ?1 AND at >= ?2 AND at < ?3
-                  GROUP BY window",
+                "SELECT window, SUM(taken) FROM (
+                     SELECT (?4 - at - 1) / ?5 AS window, COUNT(*) AS taken
+                       FROM minutes
+                      WHERE source = ?1 AND at >= ?2 AND at < ?3
+                      GROUP BY window
+                     UNION ALL
+                     SELECT (?4 - at - 1) / ?5 AS window,
+                            COUNT(DISTINCT at) * ?6 AS taken
+                       FROM hours
+                      WHERE source = ?1 AND at >= ?2 AND at < ?3
+                      GROUP BY window
+                 ) GROUP BY window",
             )?;
             let rows = query.query_map(
-                params![source, start, end.stamp(), end.stamp(), seconds],
+                params![source, start, end.stamp(), end.stamp(), seconds, MINUTES],
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
             )?;
             let mut known = vec![0; count];
@@ -424,7 +491,10 @@ impl Store {
                 if let Ok(index) = usize::try_from(index)
                     && index < count
                 {
-                    known[index] = usize::try_from(minutes).unwrap_or(0);
+                    // Час на границе окна попадает в него целиком, поэтому
+                    // снятого может выйти больше ширины. Окно от этого не
+                    // становится известнее, чем полностью.
+                    known[index] = usize::try_from(minutes).unwrap_or(0).min(width);
                 }
             }
             Ok(known)

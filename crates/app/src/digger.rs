@@ -442,6 +442,9 @@ async fn finish(
     {
         Ok(()) => {
             digger.metrics.concluded();
+            digger
+                .metrics
+                .explained(Utc::now().timestamp() - incident.began.stamp());
             jot(digger, incident, conclusion, note.as_deref()).await;
             tracing::info!(
                 incident = incident.id,

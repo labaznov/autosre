@@ -132,6 +132,7 @@ async fn sort(
                 let apart = i64::try_from(settings.link.as_secs()).unwrap_or(300);
                 let near = store.link(incident, apart).await.unwrap_or_default();
                 metrics.incident();
+                metrics.detected(Utc::now().timestamp() - deviation.at.stamp());
                 tracing::info!(
                     incident,
                     service = service.as_str(),

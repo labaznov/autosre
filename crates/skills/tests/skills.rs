@@ -75,6 +75,26 @@ fn keeps_away_from_another_signal() {
 }
 
 #[test]
+fn takes_a_metric_the_way_people_write_it() {
+    let about = PLAIN
+        .replace("  signal: errors", "  signal: metric")
+        .replace("horizon: 15m", "horizon: 1h");
+    let deviation = deviation("metrics", "1h", "{__series__=\"go_goroutines\"}");
+    assert!(Skill::parse(&about).unwrap().fits(&deviation));
+}
+
+#[test]
+fn hears_the_signals_it_knows() {
+    assert!(Skill::parse(PLAIN).unwrap().heard());
+}
+
+#[test]
+fn says_it_never_heard_of_a_made_up_signal() {
+    let odd = PLAIN.replace("  signal: errors", "  signal: metrics");
+    assert!(!Skill::parse(&odd).unwrap().heard());
+}
+
+#[test]
 fn narrows_itself_by_the_stream() {
     let narrow = PLAIN.replace(
         "  signal: errors",

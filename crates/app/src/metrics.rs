@@ -27,7 +27,91 @@ pub struct Metrics {
     drafts: AtomicU64,
     inquiries: AtomicU64,
     answered: AtomicU64,
+    detection: Spread,
+    conclusion: Spread,
 }
+
+/// Разброс времени по корзинам — гистограмма в понимании Prometheus.
+///
+/// Процентиль агент не считает: это работа мониторинга, у которого есть все
+/// экземпляры и все окна ([ADR-0024](../../../docs/adr/0024-agent-under-watch.md)).
+/// Своё среднее арифметическое было бы числом, которым удобно отчитываться и
+/// нельзя пользоваться.
+#[derive(Debug)]
+struct Spread {
+    name: &'static str,
+    about: &'static str,
+    /// Границы корзин в секундах, по возрастанию.
+    bounds: &'static [u64],
+    counts: Vec<AtomicU64>,
+    sum: AtomicU64,
+    total: AtomicU64,
+}
+
+impl Spread {
+    fn new(name: &'static str, about: &'static str, bounds: &'static [u64]) -> Self {
+        Self {
+            name,
+            about,
+            bounds,
+            counts: (0..bounds.len()).map(|_| AtomicU64::new(0)).collect(),
+            sum: AtomicU64::new(0),
+            total: AtomicU64::new(0),
+        }
+    }
+
+    /// Отмечает одно измерение. Отрицательное время — разошедшиеся часы, а не
+    /// мгновенный ответ: такое измерение не учитывается вовсе.
+    fn see(&self, seconds: i64) {
+        let Ok(seconds) = u64::try_from(seconds) else {
+            tracing::warn!(
+                self.name,
+                seconds,
+                "измерение времени отброшено: часы разошлись"
+            );
+            return;
+        };
+        for (index, edge) in self.bounds.iter().enumerate() {
+            if seconds <= *edge {
+                self.counts[index].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        self.sum.fetch_add(seconds, Ordering::Relaxed);
+        self.total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn expose(&self, out: &mut String) {
+        let total = self.total.load(Ordering::Relaxed);
+        let _ = writeln!(
+            out,
+            "# HELP {} {}\n# TYPE {} histogram",
+            self.name, self.about, self.name
+        );
+        for (index, edge) in self.bounds.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                "{}_bucket{{le=\"{edge}\"}} {}",
+                self.name,
+                self.counts[index].load(Ordering::Relaxed)
+            );
+        }
+        let _ = writeln!(out, "{}_bucket{{le=\"+Inf\"}} {total}", self.name);
+        let _ = writeln!(
+            out,
+            "{}_sum {}\n{}_count {total}",
+            self.name,
+            self.sum.load(Ordering::Relaxed),
+            self.name
+        );
+    }
+}
+
+/// Корзины времени до обнаружения: цель — пять минут по 90-му процентилю
+/// ([SPEC §12](../../../docs/SPEC.md)), поэтому вокруг неё их гуще.
+const DETECTION: &[u64] = &[60, 120, 300, 600, 900, 1800, 3600];
+
+/// Корзины времени до вывода: цель — пятнадцать минут по 90-му процентилю.
+const CONCLUSION: &[u64] = &[300, 600, 900, 1800, 3600, 7200];
 
 impl Metrics {
     #[must_use]
@@ -48,6 +132,16 @@ impl Metrics {
             drafts: AtomicU64::new(0),
             inquiries: AtomicU64::new(0),
             answered: AtomicU64::new(0),
+            detection: Spread::new(
+                "sre_detection_seconds",
+                "Время от наблюдения с отклонением до заведения инцидента",
+                DETECTION,
+            ),
+            conclusion: Spread::new(
+                "sre_conclusion_seconds",
+                "Время от первого наблюдения инцидента до готового вывода",
+                CONCLUSION,
+            ),
         }
     }
 
@@ -91,6 +185,20 @@ impl Metrics {
     /// Отмечает собранный отчёт.
     pub fn reported(&self) {
         self.reports.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Отмечает, за сколько секунд отклонение стало инцидентом.
+    ///
+    /// Начало отсчёта — момент наблюдения, а не момент, когда агент до него
+    /// добрался: дежурному важно, сколько беда прожила незамеченной, а не
+    /// сколько агент думал ([ADR-0010](../../../docs/adr/0010-incident-aggregate.md)).
+    pub fn detected(&self, seconds: i64) {
+        self.detection.see(seconds);
+    }
+
+    /// Отмечает, за сколько секунд инцидент дошёл до вывода.
+    pub fn explained(&self, seconds: i64) {
+        self.conclusion.see(seconds);
     }
 
     /// Отмечает отклонение, приглушённое человеком.
@@ -213,6 +321,8 @@ impl Metrics {
             "Заявки, на которые дежурный ответил",
             &self.answered.load(Ordering::Relaxed).to_string(),
         );
+        self.detection.expose(&mut out);
+        self.conclusion.expose(&mut out);
         counter(
             &mut out,
             "sre_source_failures_total",

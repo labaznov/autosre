@@ -3,7 +3,7 @@ name: level-shift
 title: Уровень уехал
 horizon: 15m
 when:
-  signal: metrics
+  signal: metric
 collect:
   - id: neighbours
     vm: '{__series__}{job="{service}"}'
