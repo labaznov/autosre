@@ -6,7 +6,7 @@
 
 use chrono::{TimeZone, Utc};
 use sre_domain::{Incident, Minute, State};
-use sre_store::{Asked, Finding};
+use sre_store::{Asked, Finding, Written};
 
 /// Инцидент в том виде, в каком его читает человек.
 pub struct Card {
@@ -39,6 +39,40 @@ pub struct Card {
     pub note: Option<String>,
     /// По каким словам и что нашлось в базе знаний.
     pub reading: Option<String>,
+    /// Черновики заметок, написанные по этому инциденту.
+    pub drafts: Vec<Paper>,
+}
+
+/// Черновик в том виде, в каком его читает дежурный.
+pub struct Paper {
+    pub id: i64,
+    pub incident: i64,
+    pub name: String,
+    pub title: String,
+    pub written: String,
+    pub open: bool,
+    pub state: &'static str,
+    pub who: Option<String>,
+}
+
+impl Paper {
+    #[must_use]
+    pub fn of(written: &Written) -> Self {
+        Self {
+            id: written.id,
+            incident: written.incident,
+            name: written.name.clone(),
+            title: written.title.clone(),
+            written: moment(written.written),
+            open: written.state == "open",
+            state: match written.state.as_str() {
+                "open" => "ждёт приёмки",
+                "accepted" => "принят в базу знаний",
+                _ => "отклонён",
+            },
+            who: written.who.clone(),
+        }
+    }
 }
 
 /// Заявка в том виде, в каком её читает дежурный.
@@ -128,6 +162,7 @@ impl Card {
             inquiries: Vec::new(),
             note: finding.and_then(|it| it.note.clone()),
             reading: None,
+            drafts: Vec::new(),
         }
     }
 
@@ -143,6 +178,15 @@ impl Card {
                 .iter()
                 .find(|(tool, _, _)| tool == "knowledge")
                 .map(|(_, about, _)| about.clone()),
+            ..self
+        }
+    }
+
+    /// Та же карточка с черновиками заметок.
+    #[must_use]
+    pub fn drafting(self, drafts: &[Written]) -> Self {
+        Self {
+            drafts: drafts.iter().map(Paper::of).collect(),
             ..self
         }
     }

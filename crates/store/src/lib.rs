@@ -73,6 +73,19 @@ pub struct Memory {
     pub body: String,
 }
 
+/// Черновик в том виде, в каком его читают.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Written {
+    pub id: i64,
+    pub incident: i64,
+    pub name: String,
+    pub title: String,
+    pub path: String,
+    pub state: String,
+    pub written: Minute,
+    pub who: Option<String>,
+}
+
 /// Найденная заметка.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recalled {
@@ -796,6 +809,102 @@ impl Store {
         .await
     }
 
+    /// Заводит учёт черновика, написанного по инциденту.
+    ///
+    /// Второй черновик по тому же инциденту не заводится: имя файла и есть
+    /// признак единственности, и переписывать заметку на каждом новом выводе
+    /// значит заваливать дежурного одним и тем же.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn draft(
+        &self,
+        incident: i64,
+        name: &str,
+        title: &str,
+        path: &str,
+        at: Minute,
+    ) -> Result<Option<i64>, StoreError> {
+        let (name, title, path) = (name.to_owned(), title.to_owned(), path.to_owned());
+        self.work(move |db| {
+            let written = db.execute(
+                "INSERT OR IGNORE INTO drafts (incident, name, title, path, state, written)
+                 VALUES (?1, ?2, ?3, ?4, 'open', ?5)",
+                params![incident, name, title, path, at.stamp()],
+            )?;
+            Ok((written > 0).then(|| db.last_insert_rowid()))
+        })
+        .await
+    }
+
+    /// Закрывает черновик: принят или отклонён.
+    ///
+    /// Отвечает инцидентом и путём к файлу — тому, кто закрывает, надо и
+    /// вернуться на карточку, и знать, какой файл трогать.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn settle(
+        &self,
+        draft: i64,
+        state: &str,
+        who: &str,
+        at: Minute,
+    ) -> Result<Option<(i64, String)>, StoreError> {
+        let (state, who) = (state.to_owned(), who.to_owned());
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            let touched = change.execute(
+                "UPDATE drafts SET state = ?2, who = ?3, settled = ?4
+                  WHERE id = ?1 AND state = 'open'",
+                params![draft, state, who, at.stamp()],
+            )?;
+            if touched == 0 {
+                return Ok(None);
+            }
+            let found = change.query_row(
+                "SELECT incident, path FROM drafts WHERE id = ?1",
+                params![draft],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            change.commit()?;
+            Ok(Some(found))
+        })
+        .await
+    }
+
+    /// Черновики инцидента, свежие первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn drafts(&self, incident: i64) -> Result<Vec<Written>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, incident, name, title, path, state, written, who
+                   FROM drafts WHERE incident = ?1 ORDER BY id DESC",
+            )?;
+            let rows = query.query_map(params![incident], read_draft)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Черновики, ждущие приёмки, самые старые первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn unsettled(&self, limit: usize) -> Result<Vec<Written>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, incident, name, title, path, state, written, who
+                   FROM drafts WHERE state = 'open' ORDER BY written ASC, id ASC LIMIT ?1",
+            )?;
+            let rows = query.query_map(params![limit], read_draft)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
     /// Пересобирает поисковый индекс базы знаний.
     ///
     /// Целиком, а не по одной заметке: правки приходят из чужого репозитория
@@ -1332,6 +1441,20 @@ fn terms(words: &str) -> Option<String> {
             .map(|word| format!("\"{word}\""))
             .collect::<Vec<_>>()
             .join(" OR ")
+    })
+}
+
+/// Черновик из строки таблицы.
+fn read_draft(row: &rusqlite::Row<'_>) -> rusqlite::Result<Written> {
+    Ok(Written {
+        id: row.get(0)?,
+        incident: row.get(1)?,
+        name: row.get(2)?,
+        title: row.get(3)?,
+        path: row.get(4)?,
+        state: row.get(5)?,
+        written: Minute::at(row.get(6)?),
+        who: row.get(7)?,
     })
 }
 

@@ -17,9 +17,10 @@ use serde::Deserialize;
 use sre_domain::Minute;
 use sre_store::Store;
 
+use crate::config::Knowledge;
 use crate::metrics::Metrics;
 use crate::session::{COOKIE, Doorman};
-use crate::view::{Card, Question};
+use crate::view::{Card, Paper, Question};
 
 /// Стили: вшиты в бинарь, чтобы образ оставался одним файлом.
 const STYLE: &str = include_str!("../static/style.css");
@@ -30,6 +31,7 @@ pub struct Shared {
     metrics: Arc<Metrics>,
     store: Store,
     doorman: Arc<Doorman>,
+    knowledge: Knowledge,
     version: &'static str,
 }
 
@@ -39,12 +41,14 @@ impl Shared {
         metrics: Arc<Metrics>,
         store: Store,
         doorman: Doorman,
+        knowledge: &Knowledge,
         version: &'static str,
     ) -> Self {
         Self {
             metrics,
             store,
             doorman: Arc::new(doorman),
+            knowledge: knowledge.clone(),
             version,
         }
     }
@@ -63,6 +67,7 @@ pub fn routes(shared: Shared) -> Router {
         .route("/incident/{id}/verdict", post(verdict))
         .route("/inquiry/{id}/answer", post(answer))
         .route("/waiting", get(waiting))
+        .route("/draft/{id}/settle", post(settle))
         .route("/api/metrics", get(quality))
         .route("/login", get(door).post(enter))
         .route("/logout", post(leave))
@@ -92,6 +97,7 @@ struct Single {
 #[template(path = "waiting.html")]
 struct Duty {
     inquiries: Vec<Question>,
+    drafts: Vec<Paper>,
     who: String,
     waiting: usize,
 }
@@ -128,7 +134,7 @@ async fn feed(State(shared): State<Shared>, headers: HeaderMap) -> Response {
             render(&Feed {
                 incidents: cards,
                 who,
-                waiting: pending(&shared).await.len(),
+                waiting: waits(&shared).await,
             })
         }
         Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
@@ -150,12 +156,14 @@ async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i
                     Some(found) => shared.store.steps(found.id).await.unwrap_or_default(),
                     None => Vec::new(),
                 };
+                let drafts = shared.store.drafts(id).await.unwrap_or_default();
                 render(&Single {
                     incident: Card::of(incident, related, finding.as_ref())
                         .asking(&asked)
-                        .reading(&steps),
+                        .reading(&steps)
+                        .drafting(&drafts),
                     who,
-                    waiting: pending(&shared).await.len(),
+                    waiting: waits(&shared).await,
                 })
             }
             None => failure(StatusCode::NOT_FOUND, "инцидент не найден"),
@@ -202,16 +210,84 @@ async fn waiting(State(shared): State<Shared>, headers: HeaderMap) -> Response {
         return Redirect::to("/login").into_response();
     };
     let asked = pending(&shared).await;
+    let drafts = shared.store.unsettled(100).await.unwrap_or_default();
+    let waiting = asked.len() + drafts.len();
     render(&Duty {
         inquiries: asked.iter().map(Question::of).collect(),
+        drafts: drafts.iter().map(Paper::of).collect(),
         who,
-        waiting: asked.len(),
+        waiting,
     })
 }
 
 /// Открытые заявки, самые старые первыми.
 async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
     shared.store.pending(100).await.unwrap_or_default()
+}
+
+/// Сколько всего ждёт руки дежурного: заявки плюс непринятые черновики.
+async fn waits(shared: &Shared) -> usize {
+    pending(shared).await.len() + shared.store.unsettled(100).await.unwrap_or_default().len()
+}
+
+#[derive(Debug, Deserialize)]
+struct Settling {
+    accept: String,
+}
+
+/// Приёмка черновика: только принятая заметка попадает в базу и в индекс.
+///
+/// Правит текст дежурный сам, в своём редакторе: агент не умеет писать за него
+/// и не должен делать вид ([ADR-0009](../../../docs/adr/0009-drafts-before-knowledge.md)).
+async fn settle(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(given): Form<Settling>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let accepted = given.accept == "yes";
+    let state = if accepted { "accepted" } else { "rejected" };
+    match shared
+        .store
+        .settle(id, state, &who, Minute::of(Utc::now()))
+        .await
+    {
+        Ok(Some((incident, path))) => {
+            move_draft(&shared, &path, &who, accepted).await;
+            tracing::info!(draft = id, who, accepted, "черновик разобран");
+            Redirect::to(&format!("/incident/{incident}")).into_response()
+        }
+        Ok(None) => failure(StatusCode::NOT_FOUND, "черновик не найден или уже разобран"),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+/// Переносит файл черновика и обновляет индекс поиска.
+async fn move_draft(shared: &Shared, path: &str, who: &str, accepted: bool) {
+    let (draft, notes, who) = (
+        std::path::PathBuf::from(path),
+        shared.knowledge.notes.clone(),
+        who.to_owned(),
+    );
+    let done = tokio::task::spawn_blocking(move || {
+        if accepted {
+            sre_knowledge::draft::accept(&draft, &notes, &who).map(|_| ())
+        } else {
+            sre_knowledge::draft::reject(&draft, &who)
+        }
+    })
+    .await;
+    match done {
+        Ok(Ok(())) if accepted => {
+            crate::librarian::learn(&shared.store, &shared.metrics, &shared.knowledge).await;
+        }
+        Ok(Ok(())) => {}
+        Ok(Err(failure)) => tracing::error!(%failure, path, "файл черновика не тронут"),
+        Err(failure) => tracing::error!(%failure, "перенос черновика не завершился"),
+    }
 }
 
 #[derive(Debug, Deserialize)]

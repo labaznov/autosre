@@ -9,10 +9,14 @@
 //! Крейт только читает каталог и разбирает файлы. Поиск живёт в хранилище: он
 //! требует индекса, а индекс — базы.
 
+pub mod draft;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+
+pub use draft::Draft;
 
 /// Отказы чтения базы знаний.
 #[derive(Debug, thiserror::Error)]

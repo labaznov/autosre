@@ -20,6 +20,7 @@ struct Agent {
     address: SocketAddr,
     shared: Shared,
     store: Store,
+    knowledge: sre_app::config::Knowledge,
     _directory: TempDir,
 }
 
@@ -34,10 +35,14 @@ impl Agent {
             }],
             "ключ-подписи-стенда",
         );
+        let knowledge = sre_app::config::Knowledge::default()
+            .shelf(directory.path().join("notes"), Duration::from_mins(5))
+            .drafting(directory.path().join("drafts"));
         let shared = Shared::new(
             Arc::new(Metrics::new("0.1.0-тест")),
             store.clone(),
             doorman,
+            &knowledge,
             "0.1.0-тест",
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -52,6 +57,7 @@ impl Agent {
             address,
             shared,
             store,
+            knowledge,
             _directory: directory,
         }
     }
@@ -98,6 +104,17 @@ impl Agent {
             .post(self.at(&format!("/incident/{id}/verdict")))
             .header("cookie", cookie)
             .form(&[("useful", useful)])
+            .send()
+            .await
+            .expect("запрос не дошёл");
+    }
+
+    /// Принимает или отклоняет черновик.
+    async fn settle(&self, id: i64, accept: &str, cookie: &str) {
+        Self::client()
+            .post(self.at(&format!("/draft/{id}/settle")))
+            .header("cookie", cookie)
+            .form(&[("accept", accept)])
             .send()
             .await
             .expect("запрос не дошёл");
@@ -561,4 +578,139 @@ async fn keeps_an_answer_from_a_stranger() {
         .await
         .expect("запрос не дошёл");
     assert_eq!(answer.status(), 303);
+}
+
+/// Заводит инцидент с непринятым черновиком и отвечает его номером.
+async fn drafted(agent: &Agent) -> (i64, i64) {
+    use sre_domain::Minute;
+    let incident = incident(agent).await;
+    let drafts = agent.knowledge.drafts.clone();
+    let path = sre_knowledge::draft::write(
+        &drafts,
+        &sre_knowledge::Draft {
+            name: "2026-08-17-orders-api-1".to_owned(),
+            title: "Апстрим orders-api перестал отвечать".to_owned(),
+            kind: "incident".to_owned(),
+            tags: vec!["таймаут".to_owned()],
+            signatures: vec!["upstream timed out".to_owned()],
+            services: vec!["orders-api".to_owned()],
+            incident,
+            confidence: 0.7,
+            body: "## Что было\n\nАпстрим молчит.".to_owned(),
+        },
+    )
+    .expect("черновик не записан");
+    let draft = agent
+        .store
+        .draft(
+            incident,
+            "2026-08-17-orders-api-1",
+            "Апстрим orders-api перестал отвечать",
+            &path.to_string_lossy(),
+            Minute::at(1_786_968_660),
+        )
+        .await
+        .unwrap()
+        .expect("черновик не учтён");
+    (incident, draft)
+}
+
+#[tokio::test]
+async fn shows_a_draft_on_the_card() {
+    let agent = Agent::start().await;
+    let (incident, _) = drafted(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside(&format!("/incident/{incident}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("принять в базу"));
+}
+
+#[tokio::test]
+async fn counts_an_unsettled_draft_among_what_waits() {
+    let agent = Agent::start().await;
+    drafted(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent.inside("/", &cookie).await.text().await.unwrap();
+    assert!(page.contains("ждёт вас · 1"));
+}
+
+#[tokio::test]
+async fn moves_an_accepted_draft_into_the_knowledge_base() {
+    let agent = Agent::start().await;
+    let (_, draft) = drafted(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.settle(draft, "yes", &cookie).await;
+    assert!(
+        agent
+            .knowledge
+            .notes
+            .join("2026-08-17-orders-api-1.md")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn puts_an_accepted_draft_into_the_search_index() {
+    let agent = Agent::start().await;
+    let (_, draft) = drafted(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.settle(draft, "yes", &cookie).await;
+    assert_eq!(agent.store.notes().await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn keeps_a_rejected_draft_out_of_the_knowledge_base() {
+    let agent = Agent::start().await;
+    let (_, draft) = drafted(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.settle(draft, "no", &cookie).await;
+    assert_eq!(agent.store.notes().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn names_the_one_who_settled_a_draft() {
+    let agent = Agent::start().await;
+    let (incident, draft) = drafted(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.settle(draft, "no", &cookie).await;
+    assert_eq!(
+        agent.store.drafts(incident).await.unwrap()[0]
+            .who
+            .as_deref(),
+        Some("duty")
+    );
+}
+
+#[tokio::test]
+async fn settles_a_draft_once() {
+    let agent = Agent::start().await;
+    let (_, draft) = drafted(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.settle(draft, "yes", &cookie).await;
+    assert!(agent.store.unsettled(10).await.unwrap().is_empty());
 }

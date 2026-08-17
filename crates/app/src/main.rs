@@ -149,7 +149,13 @@ async fn serve() -> Result<(), Failure> {
     if doorman.empty() {
         tracing::warn!("учётных записей нет: в веб-морду не войти никому");
     }
-    let shared = web::Shared::new(metrics, store.clone(), doorman, VERSION);
+    let shared = web::Shared::new(
+        metrics,
+        store.clone(),
+        doorman,
+        &config.file.knowledge,
+        VERSION,
+    );
     let listener = tokio::net::TcpListener::bind(config.file.bind).await?;
     tracing::info!(
         address = %config.file.bind,

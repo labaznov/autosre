@@ -273,9 +273,15 @@ pub struct Knowledge {
     /// узнать об этом без перезапуска.
     #[serde(default = "default_refresh", with = "humantime_serde")]
     pub refresh: Duration,
+    /// Каталог черновиков: туда агент пишет, оттуда дежурный принимает.
+    #[serde(default = "default_drafts")]
+    pub drafts: PathBuf,
     /// Сколько заметок уходит в досье расследования.
     #[serde(default = "default_recall")]
     pub recall: usize,
+    /// С какой уверенности вывод годится в черновик заметки.
+    #[serde(default = "default_worth")]
+    pub worth: f64,
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
 }
@@ -478,14 +484,22 @@ impl Knowledge {
             ..self
         }
     }
+
+    /// Те же настройки, но с другим каталогом черновиков.
+    #[must_use]
+    pub fn drafting(self, drafts: PathBuf) -> Self {
+        Self { drafts, ..self }
+    }
 }
 
 impl Default for Knowledge {
     fn default() -> Self {
         Self {
             notes: default_notes(),
+            drafts: default_drafts(),
             refresh: default_refresh(),
             recall: default_recall(),
+            worth: default_worth(),
             rest: BTreeMap::new(),
         }
     }
@@ -596,6 +610,12 @@ fn default_drift() -> f64 {
 }
 fn default_notes() -> PathBuf {
     PathBuf::from("/opt/data/sreagent/knowledge/notes")
+}
+fn default_drafts() -> PathBuf {
+    PathBuf::from("/opt/data/sreagent/knowledge/drafts")
+}
+fn default_worth() -> f64 {
+    0.5
 }
 fn default_refresh() -> Duration {
     Duration::from_mins(5)

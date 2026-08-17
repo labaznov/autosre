@@ -74,6 +74,7 @@ async fn answer(State(talk): State<Talk>, body: String) -> String {
 struct Stand {
     store: Store,
     seen: Arc<std::sync::Mutex<String>>,
+    drafts: TempDir,
     _skills: TempDir,
     _directory: TempDir,
 }
@@ -83,6 +84,7 @@ impl Stand {
         let directory = TempDir::new().expect("временный каталог не создан");
         let store = Store::open(&directory.path().join("sre.db")).expect("база не открыта");
         let skills = TempDir::new().expect("каталог скиллов не создан");
+        let drafts = TempDir::new().expect("каталог черновиков не создан");
         std::fs::write(skills.path().join("error-burst.md"), SKILL).expect("скилл не записан");
         store
             .remember(vec![Memory {
@@ -136,12 +138,13 @@ impl Stand {
                     .patient(Duration::from_hours(1))
                     .quick(Duration::from_millis(200)),
                 incidents: &Incidents::default(),
-                knowledge: &Knowledge::default(),
+                knowledge: &Knowledge::default().drafting(drafts.path().to_path_buf()),
             },
         ));
         Self {
             store,
             seen,
+            drafts,
             _skills: skills,
             _directory: directory,
         }
@@ -217,4 +220,31 @@ async fn writes_down_the_words_the_note_was_found_by() {
             .iter()
             .any(|(tool, about, _)| tool == "knowledge" && about.contains("vl-no-space-left"))
     );
+}
+
+#[tokio::test]
+async fn writes_a_draft_of_what_it_learned() {
+    let stand = Stand::start("выдуманная-заметка").await;
+    let incident = stand.incident().await;
+    stand.done(incident).await;
+    assert_eq!(stand.store.unsettled(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn puts_the_draft_where_the_duty_engineer_looks() {
+    let stand = Stand::start("выдуманная-заметка").await;
+    let incident = stand.incident().await;
+    stand.done(incident).await;
+    let written = std::fs::read_dir(stand.drafts.path())
+        .expect("каталог не прочитан")
+        .count();
+    assert_eq!(written, 1);
+}
+
+#[tokio::test]
+async fn spares_a_draft_when_the_answer_was_already_in_the_base() {
+    let stand = Stand::start("vl-no-space-left").await;
+    let incident = stand.incident().await;
+    stand.done(incident).await;
+    assert!(stand.store.unsettled(10).await.unwrap().is_empty());
 }

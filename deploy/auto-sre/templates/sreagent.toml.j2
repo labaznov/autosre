@@ -113,6 +113,9 @@ answer = "{{ sreagent_answer | default('1d') }}"
 [knowledge]
 # Рабочая копия репозитория знаний: заметки правят люди, агент только читает.
 notes = "/opt/data/sreagent/knowledge/notes"
+# Куда агент пишет черновики заметок и с какой уверенности берётся за них.
+drafts = "/opt/data/sreagent/knowledge/drafts"
+worth = 0.5
 refresh = "5m"
 # Сколько заметок уходит в досье расследования.
 recall = 3

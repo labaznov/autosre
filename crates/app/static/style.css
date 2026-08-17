@@ -157,3 +157,9 @@ nav form { display: inline; }
 .page { font-size: 20px; margin: 0 0 16px; }
 
 .reading { color: var(--dim); font-size: 13px; margin: 8px 0 0; }
+
+.draft { margin: 16px 0 0; padding: 12px 16px; border: 1px dashed var(--line); border-radius: 4px; }
+.draft.live { border-color: var(--dim); }
+.draft h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin: 0 0 6px; }
+.draft .title { margin: 0 0 4px; }
+.draft form { display: inline; margin-right: 8px; }

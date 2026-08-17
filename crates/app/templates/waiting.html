@@ -14,9 +14,22 @@
 {% block content %}
 <h1 class="page">Ждёт вас</h1>
 
-{% if inquiries.is_empty() %}
+{% if inquiries.is_empty() && drafts.is_empty() %}
   <p class="empty">Ждать нечего: агент ни о чём не спрашивает</p>
 {% endif %}
+
+{% for draft in drafts %}
+  <article class="incident">
+    <header>
+      <span class="state">черновик</span>
+      <a class="service" href="/incident/{{ draft.incident }}">{{ draft.title }}</a>
+      <span class="stamp">{{ draft.written }}</span>
+    </header>
+    <p class="signature">{{ draft.name }}</p>
+    <p class="numbers">инцидент
+      <a href="/incident/{{ draft.incident }}">#{{ draft.incident }}</a> · ждёт приёмки</p>
+  </article>
+{% endfor %}
 
 {% for inquiry in inquiries %}
   <article class="incident live">

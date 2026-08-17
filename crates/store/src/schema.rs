@@ -186,4 +186,26 @@ pub const STEPS: &[&str] = &[
     "
     ALTER TABLE investigations ADD COLUMN note TEXT;
     ",
+    // 10. Черновики заметок: учёт того, что ждёт приёмки.
+    //
+    // Содержимое черновика лежит файлом в репозитории знаний, здесь только
+    // учёт: чей, откуда, где лежит и что с ним стало
+    // ([ADR-0009](../../../docs/adr/0009-drafts-before-knowledge.md)). Считать
+    // непринятые обходом каталога значит читать сотню файлов ради одного числа
+    // в шапке.
+    "
+    CREATE TABLE IF NOT EXISTS drafts (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident INTEGER NOT NULL,
+        name     TEXT    NOT NULL,
+        title    TEXT    NOT NULL,
+        path     TEXT    NOT NULL,
+        state    TEXT    NOT NULL,
+        written  INTEGER NOT NULL,
+        settled  INTEGER,
+        who      TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS drafts_once ON drafts (name);
+    CREATE INDEX IF NOT EXISTS drafts_state ON drafts (state, written);
+    ",
 ];

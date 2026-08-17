@@ -215,6 +215,134 @@ async fn investigate(digger: &Digger, incident: &Incident) {
     }
 }
 
+/// Пишет черновик заметки по готовому выводу.
+///
+/// Не на каждый вывод: черновик пишется, только если агент себе верит и если
+/// вывод не пересказывает уже принятую заметку. Иначе очередь на приёмку
+/// заполняется мусором, а неразобранный черновик через месяц бесполезен —
+/// контекст забыт ([ADR-0009](../../../docs/adr/0009-drafts-before-knowledge.md)).
+///
+/// Текст собирается из того, что уже сказано: причина, совет, числа. Второй
+/// заход в модель ради красивой заметки стоит дороже, чем стоит сама заметка.
+async fn jot(
+    digger: &Digger,
+    incident: &Incident,
+    conclusion: &sre_model::Conclusion,
+    note: Option<&str>,
+) {
+    if note.is_some() || conclusion.confidence < digger.knowledge.worth {
+        return;
+    }
+    let draft = sre_knowledge::Draft {
+        name: format!(
+            "{}-{}-{}",
+            Utc::now().format("%Y-%m-%d"),
+            latin(incident.service.as_str()),
+            incident.id
+        ),
+        title: clipped(&conclusion.cause, 90),
+        kind: "incident".to_owned(),
+        tags: tags(incident),
+        signatures: vec![incident.signature.to_string()],
+        services: vec![incident.service.to_string()],
+        incident: incident.id,
+        confidence: conclusion.confidence,
+        body: format!(
+            "## Что было\n\n{}\n\nСервис {}, сигнатура «{}». Подтверждений {}, пик за окно {:.0} против обычного.\n\n## Что делать\n\n{}\n",
+            conclusion.cause,
+            incident.service,
+            incident.signature,
+            incident.seen,
+            incident.peak,
+            conclusion.advice,
+        ),
+    };
+    let drafts = digger.knowledge.drafts.clone();
+    let written = tokio::task::spawn_blocking(move || sre_knowledge::draft::write(&drafts, &draft))
+        .await
+        .ok()
+        .and_then(Result::ok);
+    let Some(path) = written else {
+        tracing::warn!(incident = incident.id, "черновик заметки не записан");
+        return;
+    };
+    let name = path.file_stem().map_or_else(String::new, |it| {
+        it.to_string_lossy()
+            .split('.')
+            .next()
+            .unwrap_or("")
+            .to_owned()
+    });
+    match digger
+        .store
+        .draft(
+            incident.id,
+            &name,
+            &clipped(&conclusion.cause, 90),
+            &path.to_string_lossy(),
+            Minute::of(Utc::now()),
+        )
+        .await
+    {
+        Ok(Some(id)) => {
+            digger.metrics.drafted();
+            tracing::info!(
+                incident = incident.id,
+                draft = id,
+                "черновик заметки написан"
+            );
+        }
+        Ok(None) => tracing::debug!(incident = incident.id, "черновик по инциденту уже есть"),
+        Err(failure) => tracing::error!(%failure, "черновик не учтён"),
+    }
+}
+
+/// Имя сервиса, годное для имени файла: латиница, цифры и дефис.
+///
+/// Имя файла попадает в ссылки и в журналы, где кириллица только мешает —
+/// [`KNOWLEDGE.md`](../../../docs/KNOWLEDGE.md) требует латиницы.
+fn latin(service: &str) -> String {
+    let name: String = service
+        .chars()
+        .map(|it| {
+            if it.is_ascii_alphanumeric() {
+                it.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let name = name.trim_matches('-').to_owned();
+    if name.is_empty() {
+        "incident".to_owned()
+    } else {
+        name
+    }
+}
+
+/// Слова для поиска: сервис и слова сигнатуры.
+fn tags(incident: &Incident) -> Vec<String> {
+    let mut tags = vec![incident.service.to_string()];
+    tags.extend(
+        incident
+            .signature
+            .as_str()
+            .split(|it: char| !it.is_alphanumeric())
+            .filter(|it| it.chars().count() >= 4)
+            .take(6)
+            .map(str::to_lowercase),
+    );
+    tags
+}
+
+/// Первые знаки строки: заголовок заметки — это заголовок, а не абзац.
+fn clipped(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_owned();
+    }
+    text.chars().take(limit).collect::<String>() + "…"
+}
+
 /// Заметка, на которую опёрся вывод, — если такая заметка есть.
 ///
 /// Имя проверяется по индексу: модель называет то, что видела в досье, но
@@ -314,6 +442,7 @@ async fn finish(
     {
         Ok(()) => {
             digger.metrics.concluded();
+            jot(digger, incident, conclusion, note.as_deref()).await;
             tracing::info!(
                 incident = incident.id,
                 service = incident.service.as_str(),

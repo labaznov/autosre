@@ -41,6 +41,7 @@ url = "2"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt"] }
 
 [dev-dependencies]
+sre-knowledge = { path = "../knowledge" }
 async-trait = "0.1"
 chrono.workspace = true
 sre-model = { path = "../model" }

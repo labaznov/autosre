@@ -57,6 +57,24 @@
     </section>
   {% endfor %}
 
+  {% for draft in incident.drafts %}
+    <section class="draft {% if draft.open %}live{% endif %}">
+      <h2>Черновик заметки</h2>
+      <p class="title">{{ draft.title }}</p>
+      <p class="stamp">{{ draft.name }} · написан {{ draft.written }}</p>
+      {% if draft.open %}
+        <form method="post" action="/draft/{{ draft.id }}/settle">
+          <input type="hidden" name="accept" value="yes"><button>принять в базу</button>
+        </form>
+        <form method="post" action="/draft/{{ draft.id }}/settle">
+          <input type="hidden" name="accept" value="no"><button>отклонить</button>
+        </form>
+      {% else %}
+        <p class="stamp">{{ draft.state }}{% if let Some(who) = draft.who %} · {{ who }}{% endif %}</p>
+      {% endif %}
+    </section>
+  {% endfor %}
+
   {% if let Some(reading) = incident.reading %}
     <p class="reading">В базе знаний {{ reading }}</p>
   {% endif %}
