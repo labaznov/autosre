@@ -1,0 +1,66 @@
+# Настройки агента для лаборатории.
+#
+# Отличия от боевых: адреса внутри сети compose, база в томе контейнера,
+# пороги ниже — в лаборатории объёмы маленькие, и с боевыми порогами не
+# сработает ничего.
+
+bind = "0.0.0.0:8096"
+database = "/opt/data/sreagent/sre.db"
+
+[logs]
+url = "http://victorialogs:9428"
+timeout = "30s"
+error_pattern = "i(error*) OR i(exception*) OR i(panic*) OR i(fatal*) OR i(traceback*)"
+# Агент пишет в те же логи, что читает. В лаборатории он в них не пишет, но
+# пусть исключение стоит с самого начала: забыть его дороже, чем не заметить.
+self_streams = ['{service="sreagent"}']
+
+[metrics]
+url = "http://victoriametrics:8428"
+timeout = "30s"
+select = [
+    "process_resident_memory_bytes",
+    "node_filesystem_avail_bytes",
+    "http_requests_total",
+]
+
+[model]
+url = "http://litellm:4000"
+name = "gemma-4-12B-it-qat-q4_0-gguf"
+timeout = "180s"
+max_tokens = 900
+temperature = 0.2
+
+[[horizon]]
+name = "15m"
+width = "15m"
+period = "1m"
+minimum = 10
+score = 3.5
+ratio = 2.0
+
+[[horizon]]
+name = "1h"
+width = "1h"
+period = "5m"
+minimum = 20
+score = 3.5
+ratio = 1.5
+
+[[horizon]]
+name = "24h"
+width = "24h"
+period = "1h"
+minimum = 100
+score = 3.0
+ratio = 1.5
+
+[queue]
+parallel = 2
+patience = "15m"
+
+[retention]
+minute_buckets = "7d"
+hour_buckets = "30d"
+investigations = "7d"
+incidents = "30d"
