@@ -7,7 +7,7 @@ use std::sync::Arc;
 use sre_app::config::{Config, Process};
 use sre_app::metrics::Metrics;
 use sre_app::session::Doorman;
-use sre_app::{VERSION, collector, digger, grouper, librarian, watcher, web};
+use sre_app::{VERSION, collector, digger, grouper, librarian, reporter, watcher, web};
 use sre_logs::{Filter, Logs};
 use sre_source::Source;
 use sre_store::Store;
@@ -145,6 +145,15 @@ async fn serve() -> Result<(), Failure> {
         },
     ));
 
+    let scribe = reporter::Reporter::new(
+        &store,
+        &metrics,
+        &model,
+        &config.file.knowledge,
+        &config.file.incidents,
+    );
+    reporter::report(scribe.clone());
+
     let doorman = Doorman::new(config.file.accounts.clone(), &config.secrets.session);
     if doorman.empty() {
         tracing::warn!("учётных записей нет: в веб-морду не войти никому");
@@ -155,7 +164,8 @@ async fn serve() -> Result<(), Failure> {
         doorman,
         &config.file.knowledge,
         VERSION,
-    );
+    )
+    .writing(scribe);
     let listener = tokio::net::TcpListener::bind(config.file.bind).await?;
     tracing::info!(
         address = %config.file.bind,

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Отчёты — Агент диагностики{% endblock %}
+
+{% block nav %}
+<nav>
+  {% include "badge.html" %}
+  <a href="/">к ленте</a>
+  <span class="who">{{ who }}</span>
+  <form method="post" action="/logout"><button class="plain">выйти</button></form>
+</nav>
+{% endblock %}
+
+{% block content %}
+<h1 class="page">Отчёты</h1>
+
+{% if reports.is_empty() %}
+  <p class="empty">Отчётов нет: первый суточный соберётся после полуночи</p>
+{% endif %}
+
+{% for report in reports %}
+  <article class="incident">
+    <header>
+      <span class="state">{{ report.about }}</span>
+      <a class="service" href="/report/{{ report.kind }}/{{ report.name }}">{{ report.title }}</a>
+      <span class="stamp">{{ report.made }}</span>
+    </header>
+  </article>
+{% endfor %}
+{% endblock %}

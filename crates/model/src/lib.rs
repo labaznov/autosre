@@ -75,6 +75,12 @@ pub struct Conclusion {
     pub note: Option<String>,
 }
 
+/// Общая картина отчёта.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Picture {
+    pub picture: String,
+}
+
 /// Клиент модели.
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -123,6 +129,16 @@ impl Model {
     pub async fn conclude(&self, skill: &str, dossier: &str) -> Result<Conclusion, ModelError> {
         let system = format!("{}\n\n{skill}", prompt::ANALYST);
         self.ask(&system, dossier, schema::conclusion()).await
+    }
+
+    /// Общая картина для отчёта: три-четыре предложения по числам.
+    ///
+    /// # Errors
+    /// [`ModelError`] при недоступности модели или ответе мимо схемы.
+    pub async fn summary(&self, facts: &str) -> Result<String, ModelError> {
+        self.ask::<Picture>(prompt::WRITER, facts, schema::picture())
+            .await
+            .map(|it| it.picture)
     }
 
     /// Один заход в модель со схемой ответа.

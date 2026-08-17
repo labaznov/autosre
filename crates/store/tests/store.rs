@@ -620,7 +620,7 @@ async fn closes_an_incident_that_went_quiet() {
         )
         .await
         .unwrap();
-    base.store.hush(at.back(-30)).await.unwrap();
+    base.store.hush(at.back(-30), at.back(-30)).await.unwrap();
     assert!(base.store.incidents(true, 10).await.unwrap().is_empty());
 }
 
@@ -639,7 +639,7 @@ async fn keeps_a_closed_incident_in_the_history() {
         )
         .await
         .unwrap();
-    base.store.hush(at.back(-30)).await.unwrap();
+    base.store.hush(at.back(-30), at.back(-30)).await.unwrap();
     assert_eq!(base.store.incidents(false, 10).await.unwrap().len(), 1);
 }
 
@@ -1426,4 +1426,140 @@ async fn names_the_streams_an_incident_is_made_of() {
     let at = minute("2026-08-17T10:15:00Z");
     let incident = crowded(&base, at).await;
     assert_eq!(base.store.parts(incident).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn counts_the_incidents_opened_in_the_window() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    incident_of(&base, &wifi(), "orders-api", at).await;
+    let digest = base.store.digest(at.back(60), at.back(-60)).await.unwrap();
+    assert_eq!(digest.opened.len(), 1);
+}
+
+#[tokio::test]
+async fn leaves_out_the_incidents_of_another_day() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    incident_of(&base, &wifi(), "orders-api", at).await;
+    let digest = base
+        .store
+        .digest(at.back(-24 * 60), at.back(-48 * 60))
+        .await
+        .unwrap();
+    assert!(digest.opened.is_empty());
+}
+
+#[tokio::test]
+async fn counts_what_the_sifter_dropped() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store.sift(id, "ночная выгрузка").await.unwrap();
+    let digest = base.store.digest(at.back(60), at.back(-60)).await.unwrap();
+    assert_eq!(digest.sifted, 1);
+}
+
+#[tokio::test]
+async fn tells_the_muted_from_the_sifted() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    let mute = base
+        .store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", ""),
+            at,
+        )
+        .await
+        .unwrap();
+    base.store.hush_deviation(id, mute).await.unwrap();
+    let digest = base.store.digest(at.back(60), at.back(-60)).await.unwrap();
+    assert_eq!((digest.hushed, digest.sifted), (1, 0));
+}
+
+#[tokio::test]
+async fn shows_what_kept_happening_under_a_mute() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    let mute = base
+        .store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", "ночью шумит"),
+            at,
+        )
+        .await
+        .unwrap();
+    base.store.hush_deviation(id, mute).await.unwrap();
+    let digest = base.store.digest(at.back(60), at.back(-60)).await.unwrap();
+    assert_eq!(digest.mutes[0].seen, 1);
+}
+
+#[tokio::test]
+async fn compares_a_stream_with_the_window_before() {
+    let base = Base::open();
+    let now = minute("2026-08-17T10:15:00Z");
+    spotted(&base, &wifi(), now.back(90), 91.0).await;
+    for step in 0..3 {
+        spotted(&base, &wifi(), now.back(-step), 91.0).await;
+    }
+    let digest = base
+        .store
+        .digest(now.back(60), now.back(-60))
+        .await
+        .unwrap();
+    assert_eq!((digest.streams[0].1, digest.streams[0].2), (3, 1));
+}
+
+#[tokio::test]
+async fn keeps_a_report_where_it_can_be_found() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .file(
+            "daily",
+            "2026-08-17",
+            "Сутки",
+            "reports/daily/x.md",
+            "# тело",
+            at,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        base.store
+            .report("daily", "2026-08-17")
+            .await
+            .unwrap()
+            .unwrap()
+            .body,
+        "# тело"
+    );
+}
+
+#[tokio::test]
+async fn rewrites_a_report_built_twice() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    for body in ["первое", "второе"] {
+        base.store
+            .file(
+                "daily",
+                "2026-08-17",
+                "Сутки",
+                "reports/daily/x.md",
+                body,
+                at,
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(base.store.reports(10).await.unwrap().len(), 1);
 }

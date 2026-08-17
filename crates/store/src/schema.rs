@@ -244,4 +244,26 @@ pub const STEPS: &[&str] = &[
     ALTER TABLE incidents ADD COLUMN merged INTEGER;
     ALTER TABLE incidents ADD COLUMN split INTEGER;
     ",
+    // 13. Момент закрытия и учёт отчётов.
+    //
+    // Без момента закрытия суточный отчёт не ответит на простой вопрос: что
+    // сегодня кончилось. Инциденты, закрытые до этого шага, останутся без
+    // момента — это честнее, чем выдумать им время задним числом.
+    //
+    // Отчёт лежит файлом в репозитории знаний, здесь — учёт: какой, за что и
+    // где ([SPEC §9](../../../docs/SPEC.md)).
+    "
+    ALTER TABLE incidents ADD COLUMN closed INTEGER;
+
+    CREATE TABLE IF NOT EXISTS reports (
+        id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind   TEXT    NOT NULL,
+        name   TEXT    NOT NULL,
+        title  TEXT    NOT NULL,
+        path   TEXT    NOT NULL,
+        made   INTEGER NOT NULL,
+        body   TEXT    NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS reports_once ON reports (kind, name);
+    ",
 ];

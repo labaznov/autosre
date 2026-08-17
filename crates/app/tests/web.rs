@@ -917,3 +917,81 @@ async fn keeps_merging_from_a_stranger() {
         .expect("запрос не дошёл");
     assert_eq!(answer.status(), 303);
 }
+
+#[tokio::test]
+async fn shows_the_shelf_of_reports() {
+    let agent = Agent::start().await;
+    agent
+        .store
+        .file(
+            "daily",
+            "2026-08-16",
+            "Сутки 2026-08-16",
+            "reports/daily/2026-08-16.md",
+            "# Сутки\n\n## Инциденты\n\nНи одного за сутки.",
+            sre_domain::Minute::at(1_786_968_660),
+        )
+        .await
+        .unwrap();
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside("/reports", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("Сутки 2026-08-16"));
+}
+
+#[tokio::test]
+async fn opens_a_report() {
+    let agent = Agent::start().await;
+    agent
+        .store
+        .file(
+            "daily",
+            "2026-08-16",
+            "Сутки 2026-08-16",
+            "reports/daily/2026-08-16.md",
+            "Ни одного за сутки",
+            sre_domain::Minute::at(1_786_968_660),
+        )
+        .await
+        .unwrap();
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside("/report/daily/2026-08-16", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("Ни одного за сутки"));
+}
+
+#[tokio::test]
+async fn says_there_are_no_reports_yet() {
+    let agent = Agent::start().await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside("/reports", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("Отчётов нет"));
+}
+
+#[tokio::test]
+async fn keeps_the_reports_from_a_stranger() {
+    let agent = Agent::start().await;
+    assert_eq!(agent.get("/reports").await.status(), 303);
+}

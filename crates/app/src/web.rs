@@ -19,8 +19,9 @@ use sre_store::Store;
 
 use crate::config::Knowledge;
 use crate::metrics::Metrics;
+use crate::reporter::{Reporter, single};
 use crate::session::{COOKIE, Doorman};
-use crate::view::{Card, Paper, Question, Silence};
+use crate::view::{Card, Filed, Paper, Question, Silence};
 
 /// Стили: вшиты в бинарь, чтобы образ оставался одним файлом.
 const STYLE: &str = include_str!("../static/style.css");
@@ -32,6 +33,7 @@ pub struct Shared {
     store: Store,
     doorman: Arc<Doorman>,
     knowledge: Knowledge,
+    reporter: Option<Reporter>,
     version: &'static str,
 }
 
@@ -49,7 +51,20 @@ impl Shared {
             store,
             doorman: Arc::new(doorman),
             knowledge: knowledge.clone(),
+            reporter: None,
             version,
+        }
+    }
+
+    /// Та же обвязка, умеющая собирать отчёты по требованию.
+    ///
+    /// Необязательная: веб-морда поднимается и в тестах, где модели нет, и
+    /// тогда кнопка «собрать отчёт» просто не работает, а страницы читаются.
+    #[must_use]
+    pub fn writing(self, reporter: Reporter) -> Self {
+        Self {
+            reporter: Some(reporter),
+            ..self
         }
     }
 
@@ -73,6 +88,9 @@ pub fn routes(shared: Shared) -> Router {
         .route("/mute/{id}/lift", post(lift))
         .route("/incident/{id}/merge", post(merge))
         .route("/incident/{id}/split", post(split))
+        .route("/reports", get(shelf))
+        .route("/report/{kind}/{name}", get(page))
+        .route("/incident/{id}/report", post(sum_up))
         .route("/api/metrics", get(quality))
         .route("/login", get(door).post(enter))
         .route("/logout", post(leave))
@@ -236,6 +254,76 @@ async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
 /// Сколько всего ждёт руки дежурного: заявки плюс непринятые черновики.
 async fn waits(shared: &Shared) -> usize {
     pending(shared).await.len() + shared.store.unsettled(100).await.unwrap_or_default().len()
+}
+
+#[derive(Template)]
+#[template(path = "reports.html")]
+struct Shelf {
+    reports: Vec<Filed>,
+    who: String,
+    waiting: usize,
+}
+
+#[derive(Template)]
+#[template(path = "report.html")]
+struct Page {
+    title: String,
+    made: String,
+    body: String,
+    who: String,
+    waiting: usize,
+}
+
+/// Полка отчётов: свежие сверху.
+async fn shelf(State(shared): State<Shared>, headers: HeaderMap) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let filed = shared.store.reports(100).await.unwrap_or_default();
+    render(&Shelf {
+        reports: filed.iter().map(Filed::of).collect(),
+        who,
+        waiting: waits(&shared).await,
+    })
+}
+
+/// Один отчёт целиком.
+async fn page(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path((kind, name)): Path<(String, String)>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    match shared.store.report(&kind, &name).await {
+        Ok(Some(report)) => render(&Page {
+            title: report.title.clone(),
+            made: crate::view::when(report.made),
+            body: report.body.clone(),
+            who,
+            waiting: waits(&shared).await,
+        }),
+        Ok(None) => failure(StatusCode::NOT_FOUND, "отчёта нет"),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+/// Отчёт по инциденту, собранный по требованию.
+async fn sum_up(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i64>) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let Some(reporter) = shared.reporter.clone() else {
+        return failure(StatusCode::SERVICE_UNAVAILABLE, "отчёты не настроены");
+    };
+    match single(&reporter, id).await {
+        Some(name) => {
+            tracing::info!(incident = id, who, "отчёт по инциденту собран");
+            Redirect::to(&format!("/report/incidents/{name}")).into_response()
+        }
+        None => failure(StatusCode::NOT_FOUND, "инцидент не найден"),
+    }
 }
 
 #[derive(Debug, Deserialize)]

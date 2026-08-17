@@ -9,6 +9,7 @@ pub mod digger;
 pub mod grouper;
 pub mod librarian;
 pub mod metrics;
+pub mod reporter;
 pub mod session;
 pub mod view;
 pub mod watcher;

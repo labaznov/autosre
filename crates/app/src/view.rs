@@ -259,6 +259,39 @@ impl Card {
     }
 }
 
+/// Отчёт в том виде, в каком его читает человек.
+pub struct Filed {
+    pub kind: String,
+    pub name: String,
+    pub title: String,
+    pub made: String,
+    /// Как называется вид отчёта по-русски.
+    pub about: &'static str,
+}
+
+impl Filed {
+    #[must_use]
+    pub fn of(filed: &sre_store::Filed) -> Self {
+        Self {
+            kind: filed.kind.clone(),
+            name: filed.name.clone(),
+            title: filed.title.clone(),
+            made: moment(filed.made),
+            about: match filed.kind.as_str() {
+                "daily" => "сутки",
+                "weekly" => "неделя",
+                _ => "инцидент",
+            },
+        }
+    }
+}
+
+/// Момент в виде, годном для показа: наружу из этого модуля.
+#[must_use]
+pub fn when(minute: Minute) -> String {
+    moment(minute)
+}
+
 /// Момент в местном для читателя виде.
 fn moment(minute: Minute) -> String {
     Utc.timestamp_opt(minute.stamp(), 0)

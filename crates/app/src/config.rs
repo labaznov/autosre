@@ -276,6 +276,9 @@ pub struct Knowledge {
     /// Каталог черновиков: туда агент пишет, оттуда дежурный принимает.
     #[serde(default = "default_drafts")]
     pub drafts: PathBuf,
+    /// Каталог отчётов: их пишет агент, люди только читают.
+    #[serde(default = "default_reports")]
+    pub reports: PathBuf,
     /// Сколько заметок уходит в досье расследования.
     #[serde(default = "default_recall")]
     pub recall: usize,
@@ -490,6 +493,12 @@ impl Knowledge {
     pub fn drafting(self, drafts: PathBuf) -> Self {
         Self { drafts, ..self }
     }
+
+    /// Те же настройки, но с другим каталогом отчётов.
+    #[must_use]
+    pub fn filing(self, reports: PathBuf) -> Self {
+        Self { reports, ..self }
+    }
 }
 
 impl Default for Knowledge {
@@ -497,6 +506,7 @@ impl Default for Knowledge {
         Self {
             notes: default_notes(),
             drafts: default_drafts(),
+            reports: default_reports(),
             refresh: default_refresh(),
             recall: default_recall(),
             worth: default_worth(),
@@ -613,6 +623,9 @@ fn default_notes() -> PathBuf {
 }
 fn default_drafts() -> PathBuf {
     PathBuf::from("/opt/data/sreagent/knowledge/drafts")
+}
+fn default_reports() -> PathBuf {
+    PathBuf::from("/opt/data/sreagent/knowledge/reports")
 }
 fn default_worth() -> f64 {
     0.5

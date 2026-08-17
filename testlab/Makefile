@@ -4,6 +4,7 @@ COMPOSE := docker compose
 help:
 	@echo "up      поднять лабораторию: логи, метрики, генератор, модель"
 	@echo "agent   поднять агента поверх лаборатории"
+	@echo "knowledge завести рабочую копию репозитория знаний"
 	@echo "seed    засеять историю заново (генератор перезапускается)"
 	@echo "watch   смотреть, что пишет генератор"
 	@echo "errors  сколько ошибок по сервисам за последний час"
@@ -16,9 +17,20 @@ up:
 	@echo "логи   http://127.0.0.1:9428/select/vmui"
 	@echo "метрики http://127.0.0.1:8428/vmui"
 
-agent:
+agent: knowledge
 	$(COMPOSE) --profile agent up -d --build agent
 	@echo "агент  http://127.0.0.1:8096/api/health"
+
+# Рабочая копия репозитория знаний: агент пишет в неё черновики и отчёты,
+# а образец в examples остаётся нетронутым.
+knowledge:
+	@mkdir -p knowledge
+	@cp -R ../examples/knowledge/. knowledge/
+	@mkdir -p knowledge/drafts knowledge/reports
+	@git -C knowledge rev-parse --git-dir >/dev/null 2>&1 || \
+		(git -C knowledge init -q && git -C knowledge add -A && \
+		 git -C knowledge -c user.name=лаборатория -c user.email=lab@localhost \
+		 commit -qm "образец базы знаний")
 
 seed:
 	$(COMPOSE) restart generator
@@ -39,5 +51,6 @@ down:
 
 clean:
 	$(COMPOSE) --profile agent down -v
+	rm -rf knowledge
 
-.PHONY: help up agent seed watch errors buckets down clean
+.PHONY: help up agent knowledge seed watch errors buckets down clean

@@ -185,3 +185,12 @@ nav form { display: inline; }
   border-radius: 4px;
   width: 160px;
 }
+
+.report {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-x: auto;
+}

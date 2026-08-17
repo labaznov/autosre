@@ -185,8 +185,8 @@ fn pick(groups: &[sre_domain::Group], deviation: &Deviation) -> Signature {
 /// Закрывает инциденты, о которых давно нет вестей.
 async fn quiet(store: &Store, settings: &Incidents) {
     let silence = i64::try_from(settings.silence.as_secs() / 60).unwrap_or(30);
-    let before = Minute::of(Utc::now()).back(silence);
-    match store.hush(before).await {
+    let now = Minute::of(Utc::now());
+    match store.hush(now.back(silence), now).await {
         Ok(closed) if closed > 0 => tracing::info!(closed, "инциденты закрыты тишиной"),
         Ok(_) => {}
         Err(failure) => tracing::error!(%failure, "инциденты не закрыты"),

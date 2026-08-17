@@ -128,6 +128,11 @@
     <span class="hint">срок обязателен: вечного приглушения не бывает</span>
   </form>
 
+  <form class="muting" method="post" action="/incident/{{ incident.id }}/report">
+    <button>собрать отчёт</button>
+    <span class="hint">по идущему инциденту отчёт будет помечен неполным</span>
+  </form>
+
   <footer class="verdict">
     {% if let Some(useful) = incident.verdict %}
       {% if useful %}<span class="judged">по делу</span>

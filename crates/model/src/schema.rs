@@ -57,6 +57,22 @@ pub fn conclusion() -> Value {
     )
 }
 
+/// Схема общей картины отчёта.
+#[must_use]
+pub fn picture() -> Value {
+    object(
+        "picture",
+        &json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["picture"],
+            "properties": {
+                "picture": {"type": "string", "maxLength": 900}
+            }
+        }),
+    )
+}
+
 /// Оборачивает схему в `response_format`, понятный OpenAI-совместимому API.
 fn object(name: &str, schema: &Value) -> Value {
     json!({

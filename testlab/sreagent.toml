@@ -90,6 +90,8 @@ answer = "1d"
 notes = "/knowledge/notes"
 # Куда агент пишет черновики заметок и с какой уверенности берётся за них.
 drafts = "/knowledge/drafts"
+# Куда ложатся отчёты: их пишет агент, люди только читают.
+reports = "/knowledge/reports"
 worth = 0.5
 refresh = "1m"
 recall = 3

@@ -101,6 +101,40 @@ pub struct Muted {
     pub seen: u64,
 }
 
+/// Свод фактов за промежуток: всё, из чего собирается отчёт.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Digest {
+    /// Заведённые за промежуток.
+    pub opened: Vec<Incident>,
+    /// Закрытые за промежуток.
+    pub closed: Vec<Incident>,
+    /// Оставшиеся открытыми.
+    pub still: Vec<Incident>,
+    pub deviations: u64,
+    /// Отсеяно моделью как привычный шум.
+    pub sifted: u64,
+    /// Приглушено человеком.
+    pub hushed: u64,
+    pub conclusions: u64,
+    pub inquiries: u64,
+    /// Принятых заметок за промежуток.
+    pub notes: u64,
+    /// Потоки: сколько отклонений сейчас и сколько в прошлом таком же окне.
+    pub streams: Vec<(Stream, u64, u64)>,
+    /// Действующие приглушения и что накопилось под ними.
+    pub mutes: Vec<Muted>,
+}
+
+/// Отчёт в том виде, в каком его читают.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Filed {
+    pub kind: String,
+    pub name: String,
+    pub title: String,
+    pub made: Minute,
+    pub body: String,
+}
+
 /// Найденная заметка.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recalled {
@@ -825,6 +859,150 @@ impl Store {
         .await
     }
 
+    /// Свод фактов за промежуток: из него собирается любой отчёт.
+    ///
+    /// Один заход в базу на отчёт, а не десять запросов из шаблона: отчёт
+    /// собирается по накопленным рядам и не ходит в источник вовсе
+    /// ([SPEC §9](../../../docs/SPEC.md)).
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn digest(&self, from: Minute, to: Minute) -> Result<Digest, StoreError> {
+        self.work(move |db| {
+            let (from, to) = (from.stamp(), to.stamp());
+            let span = to - from;
+            let incidents = |sentence: &str| -> Result<Vec<Incident>, StoreError> {
+                let mut query = db.prepare(sentence)?;
+                let rows = query.query_map(params![from, to], read_incident)?;
+                Ok(rows.collect::<Result<Vec<_>, _>>()?)
+            };
+            let opened = incidents(
+                "SELECT id, service, signature, stream, source, state, began, last,
+                        seen, peak, weight, verdict, because
+                   FROM incidents
+                  WHERE state <> 'merged' AND began >= ?1 AND began < ?2
+                  ORDER BY weight DESC, id",
+            )?;
+            let closed = incidents(
+                "SELECT id, service, signature, stream, source, state, began, last,
+                        seen, peak, weight, verdict, because
+                   FROM incidents
+                  WHERE state = 'closed' AND closed >= ?1 AND closed < ?2
+                  ORDER BY last DESC, id",
+            )?;
+            let still = incidents(
+                "SELECT id, service, signature, stream, source, state, began, last,
+                        seen, peak, weight, verdict, because
+                   FROM incidents
+                  WHERE state = 'open' AND began < ?2 AND ?1 <= ?2
+                  ORDER BY weight DESC, id",
+            )?;
+            let count = |sentence: &str| -> Result<u64, StoreError> {
+                Ok(db.query_row(sentence, params![from, to], |row| row.get::<_, u64>(0))?)
+            };
+            let deviations =
+                count("SELECT COUNT(*) FROM deviations WHERE found >= ?1 AND found < ?2")?;
+            let sifted = count(
+                "SELECT COUNT(*) FROM deviations
+                  WHERE found >= ?1 AND found < ?2 AND sifted IS NOT NULL",
+            )?;
+            let hushed = count(
+                "SELECT COUNT(*) FROM deviations
+                  WHERE found >= ?1 AND found < ?2 AND muted IS NOT NULL",
+            )?;
+            let conclusions = count(
+                "SELECT COUNT(*) FROM investigations
+                  WHERE state = 'done' AND finished >= ?1 AND finished < ?2",
+            )?;
+            let inquiries =
+                count("SELECT COUNT(*) FROM inquiries WHERE asked >= ?1 AND asked < ?2")?;
+            let notes = count(
+                "SELECT COUNT(*) FROM drafts
+                  WHERE state = 'accepted' AND settled >= ?1 AND settled < ?2",
+            )?;
+            let streams = busiest(db, from, to, span)?;
+            let mutes = silenced(db, from, to)?;
+            Ok(Digest {
+                opened,
+                closed,
+                still,
+                deviations,
+                sifted,
+                hushed,
+                conclusions,
+                inquiries,
+                notes,
+                streams,
+                mutes,
+            })
+        })
+        .await
+    }
+
+    /// Кладёт отчёт в базу; повторная сборка того же отчёта его замещает.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn file(
+        &self,
+        kind: &str,
+        name: &str,
+        title: &str,
+        path: &str,
+        body: &str,
+        at: Minute,
+    ) -> Result<i64, StoreError> {
+        let (kind, name) = (kind.to_owned(), name.to_owned());
+        let (title, path, body) = (title.to_owned(), path.to_owned(), body.to_owned());
+        self.work(move |db| {
+            db.execute(
+                "INSERT INTO reports (kind, name, title, path, made, body)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (kind, name) DO UPDATE SET
+                    title = excluded.title, path = excluded.path,
+                    made = excluded.made, body = excluded.body",
+                params![kind, name, title, path, at.stamp(), body],
+            )?;
+            Ok(db.last_insert_rowid())
+        })
+        .await
+    }
+
+    /// Отчёт по виду и имени.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn report(&self, kind: &str, name: &str) -> Result<Option<Filed>, StoreError> {
+        let (kind, name) = (kind.to_owned(), name.to_owned());
+        self.work(move |db| {
+            Ok(db
+                .query_row(
+                    "SELECT kind, name, title, made, body FROM reports
+                      WHERE kind = ?1 AND name = ?2",
+                    params![kind, name],
+                    read_report,
+                )
+                .optional()?)
+        })
+        .await
+    }
+
+    /// Отчёты, свежие первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn reports(&self, limit: usize) -> Result<Vec<Filed>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT kind, name, title, made, body FROM reports
+                  ORDER BY made DESC, id DESC LIMIT ?1",
+            )?;
+            let rows = query.query_map(params![limit], read_report)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
     /// Вливает один инцидент в другой.
     ///
     /// Переезжает всё: отклонения, расследования, заявки, черновики. Время
@@ -1381,11 +1559,12 @@ impl Store {
     ///
     /// # Errors
     /// [`StoreError::Sqlite`] на отказе записи.
-    pub async fn hush(&self, before: Minute) -> Result<usize, StoreError> {
+    pub async fn hush(&self, before: Minute, now: Minute) -> Result<usize, StoreError> {
         self.work(move |db| {
             Ok(db.execute(
-                "UPDATE incidents SET state = 'closed' WHERE state = 'open' AND last < ?1",
-                params![before.stamp()],
+                "UPDATE incidents SET state = 'closed', closed = ?2
+                  WHERE state = 'open' AND last < ?1",
+                params![before.stamp(), now.stamp()],
             )?)
         })
         .await
@@ -1776,6 +1955,69 @@ fn terms(words: &str) -> Option<String> {
             .map(|word| format!("\"{word}\""))
             .collect::<Vec<_>>()
             .join(" OR ")
+    })
+}
+
+/// Потоки промежутка: сколько отклонений сейчас и сколько в прошлом окне.
+fn busiest(
+    db: &Connection,
+    from: i64,
+    to: i64,
+    span: i64,
+) -> Result<Vec<(Stream, u64, u64)>, StoreError> {
+    let mut query = db.prepare(
+        "SELECT stream,
+                SUM(found >= ?1 AND found < ?2),
+                SUM(found >= ?3 AND found < ?1)
+           FROM deviations
+          WHERE found >= ?3 AND found < ?2
+          GROUP BY stream
+          HAVING SUM(found >= ?1 AND found < ?2) > 0
+          ORDER BY 2 DESC LIMIT 20",
+    )?;
+    let rows = query.query_map(params![from, to, from - span], |row| {
+        Ok((
+            Stream::new(row.get::<_, String>(0)?),
+            row.get::<_, u64>(1)?,
+            row.get::<_, u64>(2)?,
+        ))
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Действующие приглушения и что накопилось под ними за промежуток.
+fn silenced(db: &Connection, from: i64, to: i64) -> Result<Vec<Muted>, StoreError> {
+    let mut query = db.prepare(
+        "SELECT m.id, m.service, m.signature, m.until, m.author, m.reason, m.lifted,
+                (SELECT COUNT(*) FROM deviations d
+                  WHERE d.muted = m.id AND d.found >= ?1 AND d.found < ?2)
+           FROM mutes m
+          WHERE m.until > ?1 AND m.lifted IS NULL
+          ORDER BY 8 DESC",
+    )?;
+    let rows = query.query_map(params![from, to], |row| {
+        Ok(Muted {
+            id: row.get(0)?,
+            service: row.get(1)?,
+            signature: row.get(2)?,
+            until: Minute::at(row.get(3)?),
+            author: row.get(4)?,
+            reason: row.get(5)?,
+            live: true,
+            seen: row.get(7)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Отчёт из строки таблицы.
+fn read_report(row: &rusqlite::Row<'_>) -> rusqlite::Result<Filed> {
+    Ok(Filed {
+        kind: row.get(0)?,
+        name: row.get(1)?,
+        title: row.get(2)?,
+        made: Minute::at(row.get(3)?),
+        body: row.get(4)?,
     })
 }
 
