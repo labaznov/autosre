@@ -90,13 +90,22 @@ async fn model() -> (SocketAddr, Arc<AtomicUsize>) {
 /// Стенд: база, скиллы, поддельная модель, источник.
 struct Stand {
     store: Store,
+    digger: Digger,
     asked: Arc<AtomicUsize>,
     _skills: TempDir,
     _directory: TempDir,
 }
 
 impl Stand {
+    /// Стенд с работающей очередью.
     async fn start(patience: Duration) -> Self {
+        let stand = Self::still(patience).await;
+        dig(stand.digger.clone());
+        stand
+    }
+
+    /// Стенд без очереди: для проверок, которым нужен покой.
+    async fn still(patience: Duration) -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
         let store = Store::open(&directory.path().join("sre.db")).expect("база не открыта");
         let skills = TempDir::new().expect("каталог скиллов не создан");
@@ -118,7 +127,7 @@ impl Stand {
         );
 
         let sources: Vec<Arc<dyn Source>> = vec![Arc::new(Talker)];
-        dig(Digger::new(
+        let digger = Digger::new(
             &sources,
             &store,
             &Arc::new(Metrics::new("тест")),
@@ -126,9 +135,10 @@ impl Stand {
             sre_skills::read(skills.path()).expect("скиллы не прочитаны"),
             &Digging::default().patient(patience),
             &Incidents::default(),
-        ));
+        );
         Self {
             store,
+            digger,
             asked,
             _skills: skills,
             _directory: directory,
@@ -230,4 +240,82 @@ async fn spares_the_model_on_a_stale_incident() {
     let incident = stand.incident(120).await;
     stand.wait(incident, "skipped").await.expect("пометки нет");
     assert_eq!(stand.asked.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn closes_an_investigation_torn_by_a_restart() {
+    let stand = Stand::still(Duration::from_hours(1)).await;
+    let incident = stand.incident(1).await;
+    let torn = stand
+        .store
+        .dig(incident, "error-burst", Minute::of(chrono::Utc::now()))
+        .await
+        .unwrap();
+    // Так выглядит агент, убитый на середине: расследование есть, вывода нет.
+    let _ = torn;
+    assert_eq!(stand.store.unfinished().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn tells_a_stale_investigation_from_a_fresh_one() {
+    let stand = Stand::still(Duration::from_hours(1)).await;
+    let incident = stand.incident(1).await;
+    let old = Minute::of(chrono::Utc::now()).back(48 * 60);
+    stand.store.dig(incident, "error-burst", old).await.unwrap();
+    let (_, _, _, started) = stand.store.unfinished().await.unwrap()[0];
+    assert_eq!(started, old);
+}
+
+#[tokio::test]
+async fn takes_a_torn_investigation_out_of_the_way() {
+    let stand = Stand::still(Duration::from_hours(1)).await;
+    let incident = stand.incident(1).await;
+    stand
+        .store
+        .dig(incident, "error-burst", Minute::of(chrono::Utc::now()))
+        .await
+        .unwrap();
+    sre_app::digger::resume(&stand.digger).await;
+    assert!(stand.store.unfinished().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn marks_a_day_old_investigation_as_stale() {
+    let stand = Stand::still(Duration::from_hours(1)).await;
+    let incident = stand.incident(1).await;
+    let old = Minute::of(chrono::Utc::now()).back(48 * 60);
+    stand.store.dig(incident, "error-burst", old).await.unwrap();
+    sre_app::digger::resume(&stand.digger).await;
+    assert_eq!(
+        stand
+            .store
+            .conclusion(incident)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        "stale"
+    );
+}
+
+#[tokio::test]
+async fn marks_a_fresh_torn_investigation_as_failed() {
+    let stand = Stand::still(Duration::from_hours(1)).await;
+    let incident = stand.incident(1).await;
+    stand
+        .store
+        .dig(incident, "error-burst", Minute::of(chrono::Utc::now()))
+        .await
+        .unwrap();
+    sre_app::digger::resume(&stand.digger).await;
+    assert_eq!(
+        stand
+            .store
+            .conclusion(incident)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        "failed"
+    );
 }

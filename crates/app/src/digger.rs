@@ -61,6 +61,9 @@ impl Digger {
     }
 }
 
+/// Через сколько минут оборванное расследование считается устаревшим.
+const STALE: i64 = 24 * 60;
+
 /// Заводит очередь разбора.
 pub fn dig(digger: Digger) {
     let slots = Arc::new(Semaphore::new(digger.settings.parallel.max(1)));
@@ -315,12 +318,19 @@ async fn more(
     Some((format!("добор: {need}"), text))
 }
 
-/// Возобновляет расследования, оборванные перезапуском.
-async fn resume(digger: &Digger) {
+/// Разбирается с расследованиями, оборванными перезапуском.
+///
+/// Продолжить с середины нельзя: досье собрано, а рассуждение модели нигде не
+/// хранится — оно и не должно храниться. Поэтому оборванное закрывается, а
+/// инцидент возвращается в очередь и разбирается заново, если ещё жив.
+///
+/// Старше суток не возобновляется вовсе: данные уже другие, и вывод по ним
+/// будет хуже отсутствия вывода ([ADR-0021](../../../docs/adr/0021-state-survives-restart.md)).
+pub async fn resume(digger: &Digger) {
     let Ok(unfinished) = digger.store.unfinished().await else {
         return;
     };
-    let edge = Minute::of(Utc::now()).back(24 * 60);
+    let edge = Minute::of(Utc::now()).back(STALE);
     for (dig, incident, skill, started) in unfinished {
         // Расследование старше суток не возобновляется: данные уже другие, и
         // вывод по ним будет хуже отсутствия вывода.
