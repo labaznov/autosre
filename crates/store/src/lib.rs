@@ -628,16 +628,21 @@ impl Store {
         because: &str,
     ) -> Result<(i64, bool), StoreError> {
         let service = service.as_str().to_owned();
+        let apart = signature.apart(&found.stream).as_str().to_owned();
         let signature = signature.as_str().to_owned();
         let found = found.clone();
         let because = because.to_owned();
         self.work(move |db| {
             let change = db.unchecked_transaction()?;
+            // Выделенный дежурным поток имеет преимущество перед родителем:
+            // иначе разделение не держится дольше минуты — подтверждения
+            // возвращаются в тот инцидент, из которого их только что вынули.
             let open = change
                 .query_row(
                     "SELECT id FROM incidents
-                      WHERE service = ?1 AND signature = ?2 AND state = 'open'",
-                    params![service, signature],
+                      WHERE service = ?1 AND state = 'open' AND signature IN (?2, ?3)
+                      ORDER BY (signature = ?3) DESC LIMIT 1",
+                    params![service, signature, apart],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()?;
@@ -1242,7 +1247,9 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     parent.0,
-                    format!("{} · {}", parent.1, stream),
+                    Signature::stored(parent.1.clone())
+                        .apart(&Stream::new(stream.clone()))
+                        .as_str(),
                     stream,
                     parent.2,
                     part.0.unwrap_or_default(),
@@ -1342,20 +1349,48 @@ impl Store {
         &self,
         service: &Service,
         signature: &Signature,
+        stream: &Stream,
         now: Minute,
     ) -> Result<Option<i64>, StoreError> {
         let service = service.as_str().to_owned();
+        let apart = signature.apart(stream).as_str().to_owned();
         let signature = signature.as_str().to_owned();
         self.work(move |db| {
             Ok(db
                 .query_row(
                     "SELECT id FROM mutes
-                      WHERE service = ?1 AND signature = ?2 AND until > ?3 AND lifted IS NULL
+                      WHERE service = ?1 AND signature IN (?2, ?3)
+                        AND until > ?4 AND lifted IS NULL
                       ORDER BY until DESC LIMIT 1",
-                    params![service, signature, now.stamp()],
+                    params![service, signature, apart, now.stamp()],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()?)
+        })
+        .await
+    }
+
+    /// Есть ли у сервиса хоть одно действующее приглушение.
+    ///
+    /// Нужно ровно для одного числа: сколько раз инцидент завёлся по сервису,
+    /// который дежурный уже просил помолчать, но с другой сигнатурой. Пока это
+    /// число мало, точного совпадения пары достаточно; вырастет — значит
+    /// приглушение надо расширять, и будет чем это обосновать.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn quieted(&self, service: &Service, now: Minute) -> Result<bool, StoreError> {
+        let service = service.as_str().to_owned();
+        self.work(move |db| {
+            Ok(db
+                .query_row(
+                    "SELECT 1 FROM mutes
+                      WHERE service = ?1 AND until > ?2 AND lifted IS NULL LIMIT 1",
+                    params![service, now.stamp()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .is_some())
         })
         .await
     }

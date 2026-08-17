@@ -82,7 +82,12 @@ async fn sort(
         // уже велел не показывать, незачем
         // ([ADR-0019](../../../docs/adr/0019-muting-instead-of-per-service-thresholds.md)).
         if let Ok(Some(mute)) = store
-            .muted(&service, &signature, Minute::of(Utc::now()))
+            .muted(
+                &service,
+                &signature,
+                &deviation.stream,
+                Minute::of(Utc::now()),
+            )
             .await
         {
             if let Err(failure) = store.hush_deviation(id, mute).await {
@@ -129,18 +134,14 @@ async fn sort(
             .await
         {
             Ok((incident, fresh)) if fresh => {
-                let apart = i64::try_from(settings.link.as_secs()).unwrap_or(300);
-                let near = store.link(incident, apart).await.unwrap_or_default();
-                metrics.incident();
-                metrics.detected(Utc::now().timestamp() - deviation.at.stamp());
-                tracing::info!(
-                    incident,
-                    service = service.as_str(),
-                    signature = signature.as_str(),
-                    value = deviation.value,
-                    related = near,
-                    "инцидент заведён"
-                );
+                opened(
+                    store,
+                    metrics,
+                    settings,
+                    (incident, &service, &signature),
+                    &deviation,
+                )
+                .await;
             }
             Ok((incident, _)) => {
                 tracing::debug!(incident, "отклонение подтвердило инцидент");
@@ -151,6 +152,45 @@ async fn sort(
             }
         }
     }
+}
+
+/// Заведённый инцидент: связи, числа и подозрительная тишина рядом.
+async fn opened(
+    store: &Store,
+    metrics: &Metrics,
+    settings: &Incidents,
+    about: (i64, &Service, &Signature),
+    deviation: &Deviation,
+) {
+    let (incident, service, signature) = about;
+    let apart = i64::try_from(settings.link.as_secs()).unwrap_or(300);
+    let near = store.link(incident, apart).await.unwrap_or_default();
+    metrics.incident();
+    metrics.detected(Utc::now().timestamp() - deviation.at.stamp());
+    // Инцидент по сервису, который дежурный уже просил помолчать, но с другой
+    // сигнатурой: приглушение обошли стороной. Пока это число мало, точного
+    // совпадения пары достаточно.
+    if store
+        .quieted(service, Minute::of(Utc::now()))
+        .await
+        .unwrap_or(false)
+    {
+        metrics.dodged();
+        tracing::info!(
+            incident,
+            service = service.as_str(),
+            signature = signature.as_str(),
+            "инцидент мимо действующего приглушения того же сервиса"
+        );
+    }
+    tracing::info!(
+        incident,
+        service = service.as_str(),
+        signature = signature.as_str(),
+        value = deviation.value,
+        related = near,
+        "инцидент заведён"
+    );
 }
 
 /// Живые записи потока за окно отклонения.

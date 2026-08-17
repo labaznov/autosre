@@ -24,6 +24,7 @@ pub struct Metrics {
     notes: AtomicU64,
     reports: AtomicU64,
     hushed: AtomicU64,
+    dodged: AtomicU64,
     drafts: AtomicU64,
     inquiries: AtomicU64,
     answered: AtomicU64,
@@ -129,6 +130,7 @@ impl Metrics {
             notes: AtomicU64::new(0),
             reports: AtomicU64::new(0),
             hushed: AtomicU64::new(0),
+            dodged: AtomicU64::new(0),
             drafts: AtomicU64::new(0),
             inquiries: AtomicU64::new(0),
             answered: AtomicU64::new(0),
@@ -206,6 +208,11 @@ impl Metrics {
         self.hushed.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Отмечает инцидент, обошедший приглушение того же сервиса.
+    pub fn dodged(&self) {
+        self.dodged.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Отмечает написанный черновик заметки.
     pub fn drafted(&self) {
         self.drafts.fetch_add(1, Ordering::Relaxed);
@@ -224,6 +231,82 @@ impl Metrics {
     /// Отмечает отказ источника или модели.
     pub fn failure(&self) {
         self.failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Счётчики: всё, что растёт от начала работы.
+    fn counters(&self, out: &mut String) {
+        counter(
+            out,
+            "sre_deviations_total",
+            "Найденные отклонения",
+            &self.deviations.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_incidents_total",
+            "Заведённые инциденты",
+            &self.incidents.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_sifted_total",
+            "Отклонения, отсеянные как привычный шум",
+            &self.sifted.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_conclusions_total",
+            "Готовые выводы расследований",
+            &self.concluded.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_skipped_total",
+            "Инциденты, дошедшие до дежурного без вывода",
+            &self.skipped.load(Ordering::Relaxed).to_string(),
+        );
+        gauge(
+            out,
+            "sre_notes",
+            "Заметки базы знаний в поисковом индексе",
+            &self.notes.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_reports_total",
+            "Собранные отчёты",
+            &self.reports.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_hushed_total",
+            "Отклонения, приглушённые человеком",
+            &self.hushed.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_mute_dodged_total",
+            "Инциденты по сервису с действующим приглушением, но другой сигнатурой",
+            &self.dodged.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_drafts_total",
+            "Написанные черновики заметок",
+            &self.drafts.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_inquiries_total",
+            "Заявки, оставленные дежурному",
+            &self.inquiries.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_inquiries_answered_total",
+            "Заявки, на которые дежурный ответил",
+            &self.answered.load(Ordering::Relaxed).to_string(),
+        );
     }
 
     /// Выкладка в формате, который понимает Prometheus.
@@ -255,72 +338,7 @@ impl Metrics {
                 &last.to_string(),
             );
         }
-        counter(
-            &mut out,
-            "sre_deviations_total",
-            "Найденные отклонения",
-            &self.deviations.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_incidents_total",
-            "Заведённые инциденты",
-            &self.incidents.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_sifted_total",
-            "Отклонения, отсеянные как привычный шум",
-            &self.sifted.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_conclusions_total",
-            "Готовые выводы расследований",
-            &self.concluded.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_skipped_total",
-            "Инциденты, дошедшие до дежурного без вывода",
-            &self.skipped.load(Ordering::Relaxed).to_string(),
-        );
-        gauge(
-            &mut out,
-            "sre_notes",
-            "Заметки базы знаний в поисковом индексе",
-            &self.notes.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_reports_total",
-            "Собранные отчёты",
-            &self.reports.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_hushed_total",
-            "Отклонения, приглушённые человеком",
-            &self.hushed.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_drafts_total",
-            "Написанные черновики заметок",
-            &self.drafts.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_inquiries_total",
-            "Заявки, оставленные дежурному",
-            &self.inquiries.load(Ordering::Relaxed).to_string(),
-        );
-        counter(
-            &mut out,
-            "sre_inquiries_answered_total",
-            "Заявки, на которые дежурный ответил",
-            &self.answered.load(Ordering::Relaxed).to_string(),
-        );
+        self.counters(&mut out);
         self.detection.expose(&mut out);
         self.conclusion.expose(&mut out);
         counter(

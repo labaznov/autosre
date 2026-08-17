@@ -1150,7 +1150,12 @@ async fn finds_a_live_mute_for_a_pair() {
         .unwrap();
     assert!(
         base.store
-            .muted(&Service::new("orders-api"), &Signature::of("timed out"), at)
+            .muted(
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                &wifi(),
+                at
+            )
             .await
             .unwrap()
             .is_some()
@@ -1176,6 +1181,7 @@ async fn lets_an_expired_mute_go() {
             .muted(
                 &Service::new("orders-api"),
                 &Signature::of("timed out"),
+                &wifi(),
                 at.back(-120)
             )
             .await
@@ -1200,7 +1206,12 @@ async fn keeps_a_mute_of_one_pair_off_another() {
         .unwrap();
     assert!(
         base.store
-            .muted(&Service::new("billing-api"), &Signature::of("timed out"), at)
+            .muted(
+                &Service::new("billing-api"),
+                &Signature::of("timed out"),
+                &wifi(),
+                at
+            )
             .await
             .unwrap()
             .is_none()
@@ -1225,7 +1236,12 @@ async fn stops_a_lifted_mute_from_silencing() {
     base.store.unmute(mute, at).await.unwrap();
     assert!(
         base.store
-            .muted(&Service::new("orders-api"), &Signature::of("timed out"), at)
+            .muted(
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                &wifi(),
+                at
+            )
             .await
             .unwrap()
             .is_none()
@@ -1701,4 +1717,173 @@ async fn averages_a_level_across_minutes_and_hours_alike() {
     }
     let windows = base.store.windows("metrics", end, 3 * 60, 1).await.unwrap();
     assert!(same(windows[&wifi()].1[0], 30.0));
+}
+
+#[tokio::test]
+async fn sends_a_confirmation_to_the_stream_that_was_split_out() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = crowded(&base, at).await;
+    let born = base
+        .store
+        .split(incident, &service("orders-api-2"))
+        .await
+        .unwrap()
+        .unwrap();
+    let (id, found) = spotted(&base, &service("orders-api-2"), at.back(-9), 91.0).await;
+    let (taken, _) = base
+        .store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+            "стоит разобрать",
+        )
+        .await
+        .unwrap();
+    assert_eq!(taken, born);
+}
+
+#[tokio::test]
+async fn leaves_the_other_streams_with_the_parent_after_a_split() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = crowded(&base, at).await;
+    base.store
+        .split(incident, &service("orders-api-2"))
+        .await
+        .unwrap();
+    let (id, found) = spotted(&base, &wifi(), at.back(-9), 91.0).await;
+    let (taken, _) = base
+        .store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+            "стоит разобрать",
+        )
+        .await
+        .unwrap();
+    assert_eq!(taken, incident);
+}
+
+#[tokio::test]
+async fn keeps_a_split_out_stream_muted_with_its_parent() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", "ночью шумит"),
+            at,
+        )
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .muted(
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                &service("orders-api-2"),
+                at
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn silences_only_the_stream_a_mute_was_made_for() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out").apart(&service("orders-api-2")),
+            at.back(-7 * 24 * 60),
+            ("букин", "этот хост чинят"),
+            at,
+        )
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .muted(
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                &service("orders-api-2"),
+                at
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn lets_the_parent_speak_when_only_a_stream_is_muted() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out").apart(&service("orders-api-2")),
+            at.back(-7 * 24 * 60),
+            ("букин", "этот хост чинят"),
+            at,
+        )
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .muted(
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                &wifi(),
+                at
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn knows_a_service_it_was_asked_to_keep_quiet() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", ""),
+            at,
+        )
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .quieted(&Service::new("orders-api"), at)
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn counts_no_quiet_on_a_service_nobody_muted() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    assert!(
+        !base
+            .store
+            .quieted(&Service::new("billing-api"), at)
+            .await
+            .unwrap()
+    );
 }

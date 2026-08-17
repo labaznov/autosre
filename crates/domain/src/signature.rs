@@ -10,8 +10,18 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::bucket::Stream;
+
 /// Предел длины сигнатуры в символах.
 const LIMIT: usize = 200;
+
+/// Чем сигнатура выделенного потока отличается от родительской.
+///
+/// Пара «сервис плюс сигнатура» обязана оставаться единственной среди открытых
+/// ([ADR-0017](../../../docs/adr/0017-narrow-grouping.md)), поэтому выделенное
+/// должно отличаться хоть чем-то. Разделитель живёт здесь, в одном месте: по
+/// нему же инцидент узнаёт свои подтверждения, а приглушение — своих детей.
+const APART: &str = " · ";
 
 static UUID: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -47,6 +57,12 @@ impl Signature {
         let masked = HEX.replace_all(&masked, "<hex>");
         let masked = NUMBER.replace_all(&masked, "<n>");
         Self(clip(&masked, LIMIT))
+    }
+
+    /// Сигнатура выделенного потока: родительская плюс сам поток.
+    #[must_use]
+    pub fn apart(&self, stream: &Stream) -> Self {
+        Self(format!("{}{APART}{}", self.0, stream.as_str()))
     }
 
     /// Восстанавливает сигнатуру, нормализованную когда-то раньше.
