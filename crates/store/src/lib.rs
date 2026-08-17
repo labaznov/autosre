@@ -357,7 +357,7 @@ impl Store {
         self.work(move |db| {
             let mut query = db.prepare(
                 "SELECT id, source, stream, horizon, at, value, baseline, score, weight
-                   FROM deviations WHERE incident IS NULL
+                   FROM deviations WHERE incident IS NULL AND sifted IS NULL
                   ORDER BY weight DESC, id ASC LIMIT ?1",
             )?;
             let rows = query.query_map(params![limit], |row| {
@@ -384,6 +384,24 @@ impl Store {
         .await
     }
 
+    /// Отмечает отклонение отсеянным: модель сочла его привычным шумом.
+    ///
+    /// Пометка, а не удаление: иначе агент будет спрашивать модель об одном и
+    /// том же каждую минуту, а разобрать потом, что он гасил, станет нечем.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn sift(&self, deviation: i64, why: &str) -> Result<bool, StoreError> {
+        let why = why.to_owned();
+        self.work(move |db| {
+            Ok(db.execute(
+                "UPDATE deviations SET sifted = ?2 WHERE id = ?1",
+                params![deviation, why],
+            )? > 0)
+        })
+        .await
+    }
+
     /// Привязывает отклонение к инциденту: открывает новый или продлевает
     /// открытый с той же парой «сервис плюс сигнатура».
     ///
@@ -395,10 +413,12 @@ impl Store {
         service: &Service,
         signature: &Signature,
         found: &Deviation,
+        because: &str,
     ) -> Result<(i64, bool), StoreError> {
         let service = service.as_str().to_owned();
         let signature = signature.as_str().to_owned();
         let found = found.clone();
+        let because = because.to_owned();
         self.work(move |db| {
             let change = db.unchecked_transaction()?;
             let open = change
@@ -422,8 +442,8 @@ impl Store {
                 change.execute(
                     "INSERT INTO incidents
                        (service, signature, stream, source, state, began, last,
-                        seen, peak, weight)
-                     VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?5, 1, ?6, ?7)",
+                        seen, peak, weight, because)
+                     VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?5, 1, ?6, ?7, ?8)",
                     params![
                         service,
                         signature,
@@ -431,7 +451,8 @@ impl Store {
                         found.source,
                         found.at.stamp(),
                         found.value,
-                        found.weight
+                        found.weight,
+                        because
                     ],
                 )?;
                 (change.last_insert_rowid(), true)
@@ -499,7 +520,7 @@ impl Store {
         self.work(move |db| {
             let mut query = db.prepare(
                 "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict
+                        seen, peak, weight, verdict, because
                    FROM incidents
                   WHERE (?1 = 0 OR state = 'open')
                   ORDER BY last DESC, id DESC LIMIT ?2",
@@ -518,6 +539,7 @@ impl Store {
                     peak: row.get(9)?,
                     weight: row.get(10)?,
                     verdict: row.get::<_, Option<i64>>(11)?.map(|it| it == 1),
+                    because: row.get(12)?,
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)

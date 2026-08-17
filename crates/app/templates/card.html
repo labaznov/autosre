@@ -20,6 +20,10 @@
 
   <p class="signature">{{ incident.signature }}</p>
 
+  {% if let Some(because) = incident.because %}
+    <p class="because">Отсев решил разбираться: {{ because }}</p>
+  {% endif %}
+
   <dl class="facts">
     <dt>Начался</dt><dd>{{ incident.began }}</dd>
     <dt>Последнее подтверждение</dt><dd>{{ incident.last }}</dd>

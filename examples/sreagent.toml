@@ -81,6 +81,12 @@ login = "duty"
 # Хеш пароля. Получить: sreagent hash <пароль>
 password = "$argon2id$v=19$m=19456,t=2,p=1$N37Zjt7tGuTCu2B+BSpYRg$XeW5g91ZGp+auvy/iHsxYZVjWU4AtGqpmMudBuLJNHM"
 
+[incidents]
+# Из каких меток селектора берётся имя сервиса, в порядке предпочтения.
+service_labels = ["service", "container", "job", "app", "__series__"]
+silence = "30m"
+link = "5m"
+
 [collector]
 # Насколько глубоко закрывать дыры в ряду при старте и сколько минут просить
 # у источника за один запрос.

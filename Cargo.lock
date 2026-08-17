@@ -1298,6 +1298,7 @@ dependencies = [
  "sre-domain",
  "sre-logs",
  "sre-metrics",
+ "sre-model",
  "sre-source",
  "sre-store",
  "tempfile",
@@ -1346,6 +1347,21 @@ dependencies = [
  "serde_json",
  "sre-domain",
  "sre-source",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "sre-model"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sre-domain",
  "thiserror",
  "tokio",
  "tracing",

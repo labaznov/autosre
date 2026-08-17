@@ -136,6 +136,7 @@ async fn incident(agent: &Agent) -> i64 {
             &Service::new("orders-api"),
             &Signature::of("upstream 192.0.2.19 timed out"),
             &deviation,
+            "такого раньше не было",
         )
         .await
         .unwrap()

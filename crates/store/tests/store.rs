@@ -517,6 +517,7 @@ async fn opens_an_incident_for_a_loose_deviation() {
             &Service::new("orders-api"),
             &Signature::of("timed out"),
             &found,
+            "стоит разобрать",
         )
         .await
         .unwrap();
@@ -536,6 +537,7 @@ async fn keeps_one_incident_for_the_same_service_and_signature() {
                 &Service::new("orders-api"),
                 &Signature::of("timed out"),
                 &found,
+                "стоит разобрать",
             )
             .await
             .unwrap();
@@ -556,6 +558,7 @@ async fn counts_every_deviation_of_an_incident() {
                 &Service::new("orders-api"),
                 &Signature::of("timed out"),
                 &found,
+                "стоит разобрать",
             )
             .await
             .unwrap();
@@ -571,7 +574,13 @@ async fn separates_incidents_of_different_signatures() {
         let when = at.back(-i64::try_from(step).unwrap());
         let (id, found) = spotted(&base, &wifi(), when, 91.0).await;
         base.store
-            .attach(id, &Service::new("orders-api"), &Signature::of(text), &found)
+            .attach(
+                id,
+                &Service::new("orders-api"),
+                &Signature::of(text),
+                &found,
+                "стоит",
+            )
             .await
             .unwrap();
     }
@@ -589,6 +598,7 @@ async fn takes_a_deviation_out_of_the_loose_pile() {
             &Service::new("orders-api"),
             &Signature::of("timed out"),
             &found,
+            "стоит разобрать",
         )
         .await
         .unwrap();
@@ -606,6 +616,7 @@ async fn closes_an_incident_that_went_quiet() {
             &Service::new("orders-api"),
             &Signature::of("timed out"),
             &found,
+            "стоит разобрать",
         )
         .await
         .unwrap();
@@ -624,6 +635,7 @@ async fn keeps_a_closed_incident_in_the_history() {
             &Service::new("orders-api"),
             &Signature::of("timed out"),
             &found,
+            "стоит разобрать",
         )
         .await
         .unwrap();
@@ -640,7 +652,13 @@ async fn ties_incidents_that_began_together() {
         let (id, found) = spotted(&base, &service(name), at, 91.0).await;
         ids.push(
             base.store
-                .attach(id, &Service::new(name), &Signature::of("timed out"), &found)
+                .attach(
+                    id,
+                    &Service::new(name),
+                    &Signature::of("timed out"),
+                    &found,
+                    "стоит",
+                )
                 .await
                 .unwrap()
                 .0,
@@ -665,6 +683,7 @@ async fn leaves_distant_incidents_untied() {
                     &Service::new(*name),
                     &Signature::of("timed out"),
                     &found,
+                    "стоит разобрать",
                 )
                 .await
                 .unwrap()
@@ -688,5 +707,46 @@ async fn keeps_the_sign_of_an_endless_score() {
         base.store.deviations(10).await.unwrap()[0]
             .score
             .is_sign_negative()
+    );
+}
+
+#[tokio::test]
+async fn marks_a_sifted_deviation_instead_of_dropping_it() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store.sift(id, "ночная выгрузка").await.unwrap();
+    assert_eq!(base.store.deviations(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn stops_offering_a_sifted_deviation() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store.sift(id, "ночная выгрузка").await.unwrap();
+    assert!(base.store.loose(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn keeps_why_the_incident_was_opened() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+            "такого раньше не было",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        base.store.incidents(true, 10).await.unwrap()[0]
+            .because
+            .as_deref(),
+        Some("такого раньше не было")
     );
 }

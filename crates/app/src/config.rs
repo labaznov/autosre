@@ -212,6 +212,9 @@ pub struct Incidents {
     /// Сколько строк тянуть на сигнатуру.
     #[serde(default = "default_samples")]
     pub samples: usize,
+    /// Сколько групп сигнатур показывать модели.
+    #[serde(default = "default_groups")]
+    pub groups: usize,
     /// За какое окно брать образцы.
     #[serde(default = "default_sample_window", with = "humantime_serde")]
     pub sample_window: Duration,
@@ -369,6 +372,7 @@ impl Default for Incidents {
             service_labels: default_labels(),
             batch: default_batch(),
             samples: default_samples(),
+            groups: default_groups(),
             sample_window: default_sample_window(),
             silence: default_silence(),
             link: default_link(),
@@ -446,7 +450,9 @@ fn default_ratio() -> f64 {
     2.0
 }
 fn default_labels() -> Vec<String> {
-    ["service", "container", "job", "app"]
+    // `__series__` последним: у метрики без метки сервиса именем становится сама
+    // серия, и это читается несравнимо лучше, чем весь селектор.
+    ["service", "container", "job", "app", "__series__"]
         .into_iter()
         .map(ToOwned::to_owned)
         .collect()
@@ -456,6 +462,9 @@ fn default_batch() -> usize {
 }
 fn default_samples() -> usize {
     200
+}
+fn default_groups() -> usize {
+    7
 }
 fn default_sample_window() -> Duration {
     Duration::from_mins(15)

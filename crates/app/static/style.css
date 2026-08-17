@@ -111,3 +111,5 @@ nav form { display: inline; }
 .verdict { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
 .verdict form { display: inline; }
 .judged { color: var(--dim); font-size: 13px; }
+
+.because { color: var(--dim); font-size: 13px; font-style: italic; margin: 8px 0 0; }

@@ -2,7 +2,7 @@
 COMPOSE := docker compose
 
 help:
-	@echo "up      поднять лабораторию: логи, метрики, генератор"
+	@echo "up      поднять лабораторию: логи, метрики, генератор, модель"
 	@echo "agent   поднять агента поверх лаборатории"
 	@echo "seed    засеять историю заново (генератор перезапускается)"
 	@echo "watch   смотреть, что пишет генератор"
@@ -12,7 +12,7 @@ help:
 	@echo "clean   остановить и стереть данные"
 
 up:
-	$(COMPOSE) up -d --build victorialogs victoriametrics generator
+	$(COMPOSE) up -d --build victorialogs victoriametrics generator model
 	@echo "логи   http://127.0.0.1:9428/select/vmui"
 	@echo "метрики http://127.0.0.1:8428/vmui"
 

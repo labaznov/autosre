@@ -39,6 +39,13 @@ services:
       - victorialogs
       - victoriametrics
 
+  # Поддельная модель: живого инференса в лаборатории нет и не нужно.
+  # Проверяется конвейер, а не качество разбора, поэтому ответы предсказуемы.
+  model:
+    build: ./model
+    ports:
+      - "4000:4000"
+
   # Агент. Поднимается отдельно: `docker compose --profile agent up -d`,
   # чтобы лабораторию можно было держать и без него.
   agent:
@@ -58,6 +65,7 @@ services:
       - agent:/opt/data/sreagent
     depends_on:
       - victorialogs
+      - model
 
 volumes:
   logs:

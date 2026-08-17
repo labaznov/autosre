@@ -28,6 +28,7 @@ sha2 = "0.10"
 sre-domain = { path = "../domain" }
 sre-logs = { path = "../logs" }
 sre-metrics = { path = "../metrics" }
+sre-model = { path = "../model" }
 sre-source = { path = "../source" }
 sre-store = { path = "../store" }
 thiserror.workspace = true

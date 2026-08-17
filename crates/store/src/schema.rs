@@ -105,4 +105,13 @@ pub const STEPS: &[&str] = &[
     ALTER TABLE incidents ADD COLUMN judge TEXT;
     ALTER TABLE incidents ADD COLUMN judged INTEGER;
     ",
+    // 5. Отсев: почему отклонение не пошло дальше и почему инцидент завёлся.
+    //
+    // Отсеянное помечается, а не удаляется: иначе агент будет спрашивать модель
+    // об одном и том же каждую минуту, а разобрать потом, что он гасил, будет
+    // невозможно.
+    "
+    ALTER TABLE deviations ADD COLUMN sifted TEXT;
+    ALTER TABLE incidents ADD COLUMN because TEXT;
+    ",
 ];

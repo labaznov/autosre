@@ -4,6 +4,7 @@ members = [
     "crates/domain",
     "crates/logs",
     "crates/metrics",
+    "crates/model",
     "crates/source",
     "crates/store",
 ]

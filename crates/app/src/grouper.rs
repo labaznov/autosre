@@ -15,6 +15,8 @@ use sre_domain::{Deviation, Minute, Service, Signature, Span};
 use sre_source::Source;
 use sre_store::Store;
 
+use sre_model::{Model, prompt};
+
 use crate::config::Incidents;
 use crate::metrics::Metrics;
 
@@ -23,6 +25,7 @@ pub fn group(
     sources: &[Arc<dyn Source>],
     store: &Store,
     metrics: &Arc<Metrics>,
+    model: &Arc<Model>,
     settings: &Incidents,
 ) {
     let sources: HashMap<String, Arc<dyn Source>> = sources
@@ -31,13 +34,14 @@ pub fn group(
         .collect();
     let store = store.clone();
     let metrics = Arc::clone(metrics);
+    let model = Arc::clone(model);
     let settings = settings.clone();
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_mins(1));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            sort(&sources, &store, &metrics, &settings).await;
+            sort(&sources, &store, &metrics, &model, &settings).await;
             quiet(&store, &settings).await;
         }
     });
@@ -48,6 +52,7 @@ async fn sort(
     sources: &HashMap<String, Arc<dyn Source>>,
     store: &Store,
     metrics: &Metrics,
+    model: &Model,
     settings: &Incidents,
 ) {
     let loose = match store.loose(settings.batch).await {
@@ -66,9 +71,43 @@ async fn sort(
             );
             continue;
         };
-        let signature = signature(source.as_ref(), &deviation, settings).await;
+        let groups = groups(
+            &messages(source.as_ref(), &deviation, settings).await,
+            settings.groups,
+        );
+        let signature = pick(&groups, &deviation);
         let service = Service::of(&deviation.stream, &settings.service_labels);
-        match store.attach(id, &service, &signature, &deviation).await {
+
+        // Отсев: стоит ли этим заниматься. Модель молчит — заводим инцидент
+        // всё равно: находка обязана дойти до дежурного даже без объяснения.
+        let because = match model
+            .triage(&prompt::about(&deviation, service.as_str(), &groups))
+            .await
+        {
+            Ok(triage) if !triage.worth => {
+                metrics.sifted();
+                tracing::info!(
+                    service = service.as_str(),
+                    because = triage.because,
+                    "отклонение отсеяно как привычный шум"
+                );
+                if let Err(failure) = store.sift(id, &triage.because).await {
+                    tracing::error!(%failure, "отсев не записан");
+                }
+                continue;
+            }
+            Ok(triage) => triage.because,
+            Err(failure) => {
+                metrics.failure();
+                tracing::warn!(%failure, "отсев не удался, инцидент заводится без него");
+                "разбор отсева не состоялся: модель недоступна".to_owned()
+            }
+        };
+
+        match store
+            .attach(id, &service, &signature, &deviation, &because)
+            .await
+        {
             Ok((incident, fresh)) if fresh => {
                 let apart = i64::try_from(settings.link.as_secs()).unwrap_or(300);
                 let near = store.link(incident, apart).await.unwrap_or_default();
@@ -93,24 +132,33 @@ async fn sort(
     }
 }
 
-/// Сигнатура самой частой ошибки окна.
-///
-/// Образцов может не быть вовсе: у метрик их нет по природе, а логи могли
-/// уехать по retention. Тогда сигнатурой становится горизонт с потоком — беда
-/// всё равно должна дойти до дежурного, пусть и без узнаваемого имени.
-async fn signature(source: &dyn Source, deviation: &Deviation, settings: &Incidents) -> Signature {
+/// Живые записи потока за окно отклонения.
+async fn messages(source: &dyn Source, deviation: &Deviation, settings: &Incidents) -> Vec<String> {
     let width = i64::try_from(settings.sample_window.as_secs() / 60).unwrap_or(15);
     let span = Span::new(deviation.at.back(width), deviation.at, width + 1)
         .unwrap_or_else(|_| Span::single(deviation.at));
-    let messages = source
+    source
         .samples(&deviation.stream, span, settings.samples)
         .await
         .unwrap_or_else(|failure| {
             tracing::warn!(%failure, "образцы не получены");
             Vec::new()
-        });
-    groups(&messages, 1).first().map_or_else(
-        || Signature::of(&format!("без образцов: {}", deviation.horizon)),
+        })
+}
+
+/// Сигнатура самой частой ошибки окна.
+///
+/// Образцов может не быть вовсе: у метрик их нет по природе, а логи могли
+/// уехать по retention. Тогда сигнатурой становится сама серия или горизонт —
+/// беда должна дойти до дежурного, пусть и без узнаваемого имени.
+fn pick(groups: &[sre_domain::Group], deviation: &Deviation) -> Signature {
+    groups.first().map_or_else(
+        || {
+            Signature::of(&format!(
+                "{} на горизонте {}",
+                deviation.source, deviation.horizon
+            ))
+        },
         |group| group.signature.clone(),
     )
 }

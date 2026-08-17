@@ -23,6 +23,7 @@ pub struct Card {
     pub peak: String,
     pub weight: String,
     pub verdict: Option<bool>,
+    pub because: Option<String>,
     pub related: Vec<i64>,
 }
 
@@ -48,6 +49,7 @@ impl Card {
             peak: number(incident.peak),
             weight: number(incident.weight),
             verdict: incident.verdict,
+            because: incident.because,
             related,
         }
     }

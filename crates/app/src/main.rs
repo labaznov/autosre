@@ -71,6 +71,8 @@ enum Failure {
     Filter(#[from] sre_logs::FilterError),
     #[error("адрес источника некорректен: {0}")]
     Address(#[from] url::ParseError),
+    #[error("модель не подключена: {0}")]
+    Model(#[from] sre_model::ModelError),
 }
 
 async fn serve() -> Result<(), Failure> {
@@ -108,7 +110,15 @@ async fn serve() -> Result<(), Failure> {
     collector::collect(sources.clone(), &store, &metrics, &config.file.collector);
     collector::tidy(&sources, &store, &config.file.retention);
     watcher::watch(&sources, &store, &metrics, &config.file.enabled());
-    grouper::group(&sources, &store, &metrics, &config.file.incidents);
+    let model = Arc::new(sre_model::Model::new(sre_model::Settings {
+        url: config.file.model.url.parse()?,
+        key: config.secrets.model.clone(),
+        name: config.file.model.name.clone(),
+        temperature: config.file.model.temperature,
+        tokens: config.file.model.max_tokens,
+        timeout: config.file.model.timeout,
+    })?);
+    grouper::group(&sources, &store, &metrics, &model, &config.file.incidents);
 
     let doorman = Doorman::new(config.file.accounts.clone(), &config.secrets.session);
     if doorman.empty() {

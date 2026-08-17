@@ -18,6 +18,7 @@ pub struct Metrics {
     failures: AtomicU64,
     deviations: AtomicU64,
     incidents: AtomicU64,
+    sifted: AtomicU64,
 }
 
 impl Metrics {
@@ -30,6 +31,7 @@ impl Metrics {
             failures: AtomicU64::new(0),
             deviations: AtomicU64::new(0),
             incidents: AtomicU64::new(0),
+            sifted: AtomicU64::new(0),
         }
     }
 
@@ -47,6 +49,11 @@ impl Metrics {
     /// Отмечает заведённый инцидент.
     pub fn incident(&self) {
         self.incidents.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Отмечает отклонение, отсеянное как привычный шум.
+    pub fn sifted(&self) {
+        self.sifted.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Отмечает отказ источника или модели.
@@ -94,6 +101,12 @@ impl Metrics {
             "sre_incidents_total",
             "Заведённые инциденты",
             &self.incidents.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            &mut out,
+            "sre_sifted_total",
+            "Отклонения, отсеянные как привычный шум",
+            &self.sifted.load(Ordering::Relaxed).to_string(),
         );
         counter(
             &mut out,
