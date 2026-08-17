@@ -171,6 +171,37 @@ async fn incident(agent: &Agent) -> i64 {
         .0
 }
 
+/// Заводит второй инцидент — другого сервиса и другой сигнатуры.
+async fn other(agent: &Agent) -> i64 {
+    use sre_domain::{Detector, Deviation, Kind, Minute, Service, Signature, Stream, Thresholds};
+    let at = Minute::at(1_786_968_720);
+    let stream = Stream::new("{host=\"node-01\",service=\"billing-api\"}");
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
+    let deviation = Deviation::new("logs", &stream, "15m", at, verdict);
+    agent.store.spot(&deviation, at).await.unwrap();
+    let id = agent
+        .store
+        .loose(10)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|(_, it)| it.stream == stream)
+        .expect("отклонение не найдено")
+        .0;
+    agent
+        .store
+        .attach(
+            id,
+            &Service::new("billing-api"),
+            &Signature::of("connection refused"),
+            &deviation,
+            "такого раньше не было",
+        )
+        .await
+        .unwrap()
+        .0
+}
+
 #[tokio::test]
 async fn answers_the_health_check() {
     let agent = Agent::start().await;
@@ -804,6 +835,83 @@ async fn keeps_muting_from_a_stranger() {
     let answer = Agent::client()
         .post(agent.at(&format!("/incident/{id}/mute")))
         .form(&[("days", "7"), ("reason", "чужой")])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert_eq!(answer.status(), 303);
+}
+
+#[tokio::test]
+async fn merges_two_incidents_at_the_word_of_the_duty_engineer() {
+    let agent = Agent::start().await;
+    let first = incident(&agent).await;
+    let second = other(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    Agent::client()
+        .post(agent.at(&format!("/incident/{first}/merge")))
+        .header("cookie", &cookie)
+        .form(&[("other", second.to_string())])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert_eq!(agent.store.merged(first).await.unwrap(), vec![second]);
+}
+
+#[tokio::test]
+async fn shows_what_an_incident_was_built_from() {
+    let agent = Agent::start().await;
+    let first = incident(&agent).await;
+    let second = other(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    Agent::client()
+        .post(agent.at(&format!("/incident/{first}/merge")))
+        .header("cookie", &cookie)
+        .form(&[("other", second.to_string())])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    let page = agent
+        .inside(&format!("/incident/{first}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("Собран из"));
+}
+
+#[tokio::test]
+async fn takes_a_merged_incident_off_the_feed() {
+    let agent = Agent::start().await;
+    let first = incident(&agent).await;
+    let second = other(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    Agent::client()
+        .post(agent.at(&format!("/incident/{first}/merge")))
+        .header("cookie", &cookie)
+        .form(&[("other", second.to_string())])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert_eq!(agent.store.incidents(false, 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn keeps_merging_from_a_stranger() {
+    let agent = Agent::start().await;
+    let first = incident(&agent).await;
+    let second = other(&agent).await;
+    let answer = Agent::client()
+        .post(agent.at(&format!("/incident/{first}/merge")))
+        .form(&[("other", second.to_string())])
         .send()
         .await
         .expect("запрос не дошёл");

@@ -41,6 +41,16 @@ pub struct Card {
     pub reading: Option<String>,
     /// Черновики заметок, написанные по этому инциденту.
     pub drafts: Vec<Paper>,
+    /// Номера инцидентов, влитых в этот.
+    pub merged: Vec<i64>,
+    /// Потоки инцидента со счётчиками: по ним его и разделяют.
+    pub parts: Vec<Part>,
+}
+
+/// Поток инцидента в том виде, в каком его читает дежурный.
+pub struct Part {
+    pub stream: String,
+    pub seen: u64,
 }
 
 /// Черновик в том виде, в каком его читает дежурный.
@@ -158,6 +168,7 @@ impl Card {
                 State::Open => "идёт",
                 State::Closed => "закрыт",
                 State::Abandoned => "без разбора",
+                State::Merged => "влит в другой",
             },
             open: incident.state == State::Open,
             began: moment(incident.began),
@@ -191,6 +202,8 @@ impl Card {
             note: finding.and_then(|it| it.note.clone()),
             reading: None,
             drafts: Vec::new(),
+            merged: Vec::new(),
+            parts: Vec::new(),
         }
     }
 
@@ -206,6 +219,22 @@ impl Card {
                 .iter()
                 .find(|(tool, _, _)| tool == "knowledge")
                 .map(|(_, about, _)| about.clone()),
+            ..self
+        }
+    }
+
+    /// Та же карточка с историей группировки: из чего собрана и на что делится.
+    #[must_use]
+    pub fn built(self, merged: Vec<i64>, parts: &[(sre_domain::Stream, u64)]) -> Self {
+        Self {
+            merged,
+            parts: parts
+                .iter()
+                .map(|(stream, seen)| Part {
+                    stream: stream.to_string(),
+                    seen: *seen,
+                })
+                .collect(),
             ..self
         }
     }

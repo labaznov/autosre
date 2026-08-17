@@ -94,6 +94,33 @@
     <dt>Поток</dt><dd><code>{{ incident.stream }}</code></dd>
   </dl>
 
+  {% if !incident.merged.is_empty() %}
+    <p class="related">
+      Собран из:
+      {% for other in incident.merged %}<a href="/incident/{{ other }}">#{{ other }}</a>{% endfor %}
+      — объединил дежурный.
+    </p>
+  {% endif %}
+
+  {% if incident.parts.len() > 1 %}
+    <section class="parts">
+      <h2>Потоки инцидента</h2>
+      {% for part in incident.parts %}
+        <form method="post" action="/incident/{{ incident.id }}/split">
+          <code>{{ part.stream }}</code> · {{ part.seen }}
+          <input type="hidden" name="stream" value="{{ part.stream }}">
+          <button>вынести отдельно</button>
+        </form>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <form class="muting" method="post" action="/incident/{{ incident.id }}/merge">
+    <input name="other" placeholder="номер инцидента" inputmode="numeric">
+    <button>влить сюда</button>
+    <span class="hint">подтверждения и разборы переедут, время возьмётся раннее</span>
+  </form>
+
   <form class="muting" method="post" action="/incident/{{ incident.id }}/mute">
     <input type="hidden" name="days" value="7">
     <input name="reason" placeholder="почему приглушаем">

@@ -173,3 +173,15 @@ nav form { display: inline; }
   border-radius: 4px;
   min-width: 220px;
 }
+
+.parts { margin: 16px 0 0; }
+.parts h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin: 0 0 6px; }
+.parts form { display: flex; gap: 8px; align-items: center; margin: 4px 0; font-size: 13px; }
+.muting input[name="other"] {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  width: 160px;
+}

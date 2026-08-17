@@ -1231,3 +1231,199 @@ async fn stops_a_lifted_mute_from_silencing() {
             .is_none()
     );
 }
+
+/// Инцидент с одним отклонением заданного потока.
+async fn incident_of(base: &Base, stream: &Stream, name: &str, at: Minute) -> i64 {
+    let (id, found) = spotted(base, stream, at, 91.0).await;
+    base.store
+        .attach(
+            id,
+            &Service::new(name),
+            &Signature::of(&format!("сигнатура {name}")),
+            &found,
+            "стоит разобрать",
+        )
+        .await
+        .unwrap()
+        .0
+}
+
+#[tokio::test]
+async fn merges_two_incidents_into_one() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let first = incident_of(&base, &wifi(), "orders-api", at).await;
+    let second = incident_of(&base, &service("billing-api"), "billing-api", at).await;
+    base.store.merge(first, second).await.unwrap();
+    assert_eq!(base.store.incidents(false, 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn keeps_a_merged_incident_reachable_by_its_number() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let first = incident_of(&base, &wifi(), "orders-api", at).await;
+    let second = incident_of(&base, &service("billing-api"), "billing-api", at).await;
+    base.store.merge(first, second).await.unwrap();
+    assert!(base.store.one(second).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn remembers_what_an_incident_was_built_from() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let first = incident_of(&base, &wifi(), "orders-api", at).await;
+    let second = incident_of(&base, &service("billing-api"), "billing-api", at).await;
+    base.store.merge(first, second).await.unwrap();
+    assert_eq!(base.store.merged(first).await.unwrap(), vec![second]);
+}
+
+#[tokio::test]
+async fn counts_a_merged_incident_from_the_earliest_moment() {
+    let base = Base::open();
+    let early = minute("2026-08-17T09:00:00Z");
+    let late = minute("2026-08-17T10:15:00Z");
+    let first = incident_of(&base, &wifi(), "orders-api", late).await;
+    let second = incident_of(&base, &service("billing-api"), "billing-api", early).await;
+    base.store.merge(first, second).await.unwrap();
+    assert_eq!(base.store.one(first).await.unwrap().unwrap().began, early);
+}
+
+#[tokio::test]
+async fn moves_the_confirmations_of_a_merged_incident() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let first = incident_of(&base, &wifi(), "orders-api", at).await;
+    let second = incident_of(&base, &service("billing-api"), "billing-api", at).await;
+    base.store.merge(first, second).await.unwrap();
+    assert_eq!(base.store.one(first).await.unwrap().unwrap().seen, 2);
+}
+
+#[tokio::test]
+async fn moves_the_verdict_of_a_merged_incident() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let first = incident_of(&base, &wifi(), "orders-api", at).await;
+    let second = incident_of(&base, &service("billing-api"), "billing-api", at).await;
+    base.store.judge(second, true, "букин", at).await.unwrap();
+    base.store.merge(first, second).await.unwrap();
+    assert_eq!(
+        base.store.one(first).await.unwrap().unwrap().verdict,
+        Some(true)
+    );
+}
+
+#[tokio::test]
+async fn keeps_its_own_verdict_when_merging() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let first = incident_of(&base, &wifi(), "orders-api", at).await;
+    let second = incident_of(&base, &service("billing-api"), "billing-api", at).await;
+    base.store.judge(first, false, "букин", at).await.unwrap();
+    base.store.judge(second, true, "другой", at).await.unwrap();
+    base.store.merge(first, second).await.unwrap();
+    assert_eq!(
+        base.store.one(first).await.unwrap().unwrap().verdict,
+        Some(false)
+    );
+}
+
+#[tokio::test]
+async fn refuses_to_merge_an_incident_into_itself() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let only = incident_of(&base, &wifi(), "orders-api", at).await;
+    assert!(!base.store.merge(only, only).await.unwrap());
+}
+
+#[tokio::test]
+async fn moves_the_investigations_of_a_merged_incident() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let first = incident_of(&base, &wifi(), "orders-api", at).await;
+    let second = incident_of(&base, &service("billing-api"), "billing-api", at).await;
+    base.store.dig(second, "error-burst", at).await.unwrap();
+    base.store.merge(first, second).await.unwrap();
+    assert!(base.store.conclusion(first).await.unwrap().is_some());
+}
+
+/// Инцидент, собравший отклонения двух потоков под одной сигнатурой.
+async fn crowded(base: &Base, at: Minute) -> i64 {
+    let mut incident = 0;
+    for (step, stream) in [wifi(), service("orders-api-2"), wifi()]
+        .into_iter()
+        .enumerate()
+    {
+        let step = i64::try_from(step).unwrap_or(0);
+        let (id, found) = spotted(base, &stream, at.back(-step), 91.0).await;
+        incident = base
+            .store
+            .attach(
+                id,
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                &found,
+                "стоит разобрать",
+            )
+            .await
+            .unwrap()
+            .0;
+    }
+    incident
+}
+
+#[tokio::test]
+async fn splits_a_stream_out_of_an_incident() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = crowded(&base, at).await;
+    assert!(
+        base.store
+            .split(incident, &service("orders-api-2"))
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn leaves_the_rest_of_the_confirmations_where_they_were() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = crowded(&base, at).await;
+    base.store
+        .split(incident, &service("orders-api-2"))
+        .await
+        .unwrap();
+    assert_eq!(base.store.one(incident).await.unwrap().unwrap().seen, 2);
+}
+
+#[tokio::test]
+async fn takes_the_confirmations_of_the_split_stream() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = crowded(&base, at).await;
+    let born = base
+        .store
+        .split(incident, &service("orders-api-2"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(base.store.one(born).await.unwrap().unwrap().seen, 1);
+}
+
+#[tokio::test]
+async fn refuses_to_split_off_the_whole_incident() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = incident_of(&base, &wifi(), "orders-api", at).await;
+    assert!(base.store.split(incident, &wifi()).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn names_the_streams_an_incident_is_made_of() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = crowded(&base, at).await;
+    assert_eq!(base.store.parts(incident).await.unwrap().len(), 2);
+}

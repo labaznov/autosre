@@ -231,4 +231,17 @@ pub const STEPS: &[&str] = &[
 
     ALTER TABLE deviations ADD COLUMN muted INTEGER;
     ",
+    // 12. Правка группировки: во что инцидент влит и из чего выделен.
+    //
+    // Правило группировки узкое и ошибается в обе стороны
+    // ([ADR-0017](../../../docs/adr/0017-narrow-grouping.md)), поэтому у
+    // дежурного должны быть обе кнопки. Без них любая ошибка группировки
+    // становится неисправимой ([ADR-0010](../../../docs/adr/0010-incident-aggregate.md)).
+    //
+    // Влитый инцидент не удаляется: он несёт своё время первого наблюдения, а
+    // на нём держится метрика времени до обнаружения.
+    "
+    ALTER TABLE incidents ADD COLUMN merged INTEGER;
+    ALTER TABLE incidents ADD COLUMN split INTEGER;
+    ",
 ];

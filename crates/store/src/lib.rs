@@ -825,6 +825,185 @@ impl Store {
         .await
     }
 
+    /// Вливает один инцидент в другой.
+    ///
+    /// Переезжает всё: отклонения, расследования, заявки, черновики. Время
+    /// первого наблюдения берётся самое раннее — на нём держится время до
+    /// обнаружения, и потерять его значит соврать в приёмке.
+    ///
+    /// Оценка дежурного переезжает, только если у принимающего её ещё нет:
+    /// чужая оценка не отменяет своей.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn merge(&self, into: i64, from: i64) -> Result<bool, StoreError> {
+        self.work(move |db| {
+            if into == from {
+                return Ok(false);
+            }
+            let change = db.unchecked_transaction()?;
+            let known: i64 = change.query_row(
+                "SELECT COUNT(*) FROM incidents WHERE id IN (?1, ?2) AND state <> 'merged'",
+                params![into, from],
+                |row| row.get(0),
+            )?;
+            if known < 2 {
+                return Ok(false);
+            }
+            for sentence in [
+                "UPDATE deviations SET incident = ?1 WHERE incident = ?2",
+                "UPDATE investigations SET incident = ?1 WHERE incident = ?2",
+                "UPDATE inquiries SET incident = ?1 WHERE incident = ?2",
+                "UPDATE drafts SET incident = ?1 WHERE incident = ?2",
+            ] {
+                change.execute(sentence, params![into, from])?;
+            }
+            change.execute(
+                "UPDATE incidents SET
+                    began = MIN(began, (SELECT began FROM incidents WHERE id = ?2)),
+                    last = MAX(last, (SELECT last FROM incidents WHERE id = ?2)),
+                    seen = seen + (SELECT seen FROM incidents WHERE id = ?2),
+                    peak = MAX(peak, (SELECT peak FROM incidents WHERE id = ?2)),
+                    weight = MAX(weight, (SELECT weight FROM incidents WHERE id = ?2)),
+                    verdict = COALESCE(verdict, (SELECT verdict FROM incidents WHERE id = ?2)),
+                    judge = COALESCE(judge, (SELECT judge FROM incidents WHERE id = ?2))
+                  WHERE id = ?1",
+                params![into, from],
+            )?;
+            change.execute(
+                "UPDATE incidents SET state = 'merged', merged = ?2 WHERE id = ?1",
+                params![from, into],
+            )?;
+            change.commit()?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Выделяет из инцидента отклонения одного потока в новый инцидент.
+    ///
+    /// Сигнатура нового уточняется потоком: пара «сервис плюс сигнатура»
+    /// должна остаться единственной среди открытых, а выделенное — отличаться
+    /// хоть чем-то, иначе группировка тут же сольёт их обратно.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn split(&self, incident: i64, stream: &Stream) -> Result<Option<i64>, StoreError> {
+        let stream = stream.as_str().to_owned();
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            let Some(parent) = change
+                .query_row(
+                    "SELECT service, signature, source, verdict FROM incidents WHERE id = ?1",
+                    params![incident],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<i64>>(3)?,
+                        ))
+                    },
+                )
+                .optional()?
+            else {
+                return Ok(None);
+            };
+            let Some(part) = change
+                .query_row(
+                    "SELECT MIN(at), MAX(at), COUNT(*), MAX(value), MAX(weight)
+                       FROM deviations WHERE incident = ?1 AND stream = ?2",
+                    params![incident, stream],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<i64>>(0)?,
+                            row.get::<_, Option<i64>>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Option<f64>>(3)?,
+                            row.get::<_, Option<f64>>(4)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .filter(|it| it.2 > 0)
+            else {
+                return Ok(None);
+            };
+            let left: i64 = change.query_row(
+                "SELECT COUNT(*) FROM deviations WHERE incident = ?1 AND stream <> ?2",
+                params![incident, stream],
+                |row| row.get(0),
+            )?;
+            if left == 0 {
+                // Выделять весь инцидент целиком незачем: получится он же.
+                return Ok(None);
+            }
+            change.execute(
+                "INSERT INTO incidents
+                   (service, signature, stream, source, state, began, last, seen, peak,
+                    weight, verdict, because, split)
+                 VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    parent.0,
+                    format!("{} · {}", parent.1, stream),
+                    stream,
+                    parent.2,
+                    part.0.unwrap_or_default(),
+                    part.1.unwrap_or_default(),
+                    part.2,
+                    part.3.unwrap_or_default(),
+                    part.4.unwrap_or_default(),
+                    parent.3,
+                    "выделен дежурным из другого инцидента",
+                    incident
+                ],
+            )?;
+            let born = change.last_insert_rowid();
+            change.execute(
+                "UPDATE deviations SET incident = ?1 WHERE incident = ?2 AND stream = ?3",
+                params![born, incident, stream],
+            )?;
+            change.execute(
+                "UPDATE incidents SET seen = seen - ?2 WHERE id = ?1",
+                params![incident, part.2],
+            )?;
+            change.commit()?;
+            Ok(Some(born))
+        })
+        .await
+    }
+
+    /// Из чего инцидент собран: номера влитых в него.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn merged(&self, incident: i64) -> Result<Vec<i64>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare("SELECT id FROM incidents WHERE merged = ?1 ORDER BY id")?;
+            let rows = query.query_map(params![incident], |row| row.get::<_, i64>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Потоки инцидента со счётчиками: по ним его и разделяют.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn parts(&self, incident: i64) -> Result<Vec<(Stream, u64)>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT stream, COUNT(*) FROM deviations WHERE incident = ?1
+                  GROUP BY stream ORDER BY COUNT(*) DESC",
+            )?;
+            let rows = query.query_map(params![incident], |row| {
+                Ok((Stream::new(row.get::<_, String>(0)?), row.get::<_, u64>(1)?))
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
     /// Приглушает пару «сервис плюс сигнатура» до указанного срока.
     ///
     /// # Errors
@@ -1253,11 +1432,33 @@ impl Store {
                 "SELECT id, service, signature, stream, source, state, began, last,
                         seen, peak, weight, verdict, because
                    FROM incidents
-                  WHERE (?1 = 0 OR state = 'open')
+                  WHERE state <> 'merged' AND (?1 = 0 OR state = 'open')
                   ORDER BY last DESC, id DESC LIMIT ?2",
             )?;
             let rows = query.query_map(params![i64::from(open), limit], read_incident)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Один инцидент по номеру.
+    ///
+    /// Отдельно от ленты: влитый инцидент из ленты убран, но открыть его по
+    /// ссылке «собран из» дежурный должен.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn one(&self, incident: i64) -> Result<Option<Incident>, StoreError> {
+        self.work(move |db| {
+            Ok(db
+                .query_row(
+                    "SELECT id, service, signature, stream, source, state, began, last,
+                            seen, peak, weight, verdict, because
+                       FROM incidents WHERE id = ?1",
+                    params![incident],
+                    read_incident,
+                )
+                .optional()?)
         })
         .await
     }

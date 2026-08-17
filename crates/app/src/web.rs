@@ -71,6 +71,8 @@ pub fn routes(shared: Shared) -> Router {
         .route("/mutes", get(mutes))
         .route("/incident/{id}/mute", post(mute))
         .route("/mute/{id}/lift", post(lift))
+        .route("/incident/{id}/merge", post(merge))
+        .route("/incident/{id}/split", post(split))
         .route("/api/metrics", get(quality))
         .route("/login", get(door).post(enter))
         .route("/logout", post(leave))
@@ -149,8 +151,8 @@ async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i
     let Some(who) = guard(&shared, &headers) else {
         return Redirect::to("/login").into_response();
     };
-    match shared.store.incidents(false, 500).await {
-        Ok(incidents) => match incidents.into_iter().find(|it| it.id == id) {
+    match shared.store.one(id).await {
+        Ok(found) => match found {
             Some(incident) => {
                 let related = shared.store.related(id).await.unwrap_or_default();
                 let finding = shared.store.conclusion(id).await.unwrap_or_default();
@@ -160,11 +162,14 @@ async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i
                     None => Vec::new(),
                 };
                 let drafts = shared.store.drafts(id).await.unwrap_or_default();
+                let merged = shared.store.merged(id).await.unwrap_or_default();
+                let parts = shared.store.parts(id).await.unwrap_or_default();
                 render(&Single {
                     incident: Card::of(incident, related, finding.as_ref())
                         .asking(&asked)
                         .reading(&steps)
-                        .drafting(&drafts),
+                        .drafting(&drafts)
+                        .built(merged, &parts),
                     who,
                     waiting: waits(&shared).await,
                 })
@@ -231,6 +236,66 @@ async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
 /// Сколько всего ждёт руки дежурного: заявки плюс непринятые черновики.
 async fn waits(shared: &Shared) -> usize {
     pending(shared).await.len() + shared.store.unsettled(100).await.unwrap_or_default().len()
+}
+
+#[derive(Debug, Deserialize)]
+struct Merging {
+    other: i64,
+}
+
+/// Объединение инцидентов: дежурный решил, что это одна беда.
+async fn merge(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(given): Form<Merging>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    match shared.store.merge(id, given.other).await {
+        Ok(true) => {
+            tracing::info!(into = id, from = given.other, who, "инциденты объединены");
+            Redirect::to(&format!("/incident/{id}")).into_response()
+        }
+        Ok(false) => failure(
+            StatusCode::NOT_FOUND,
+            "инцидента нет, или он уже влит в другой",
+        ),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Splitting {
+    stream: String,
+}
+
+/// Разделение инцидента: один из потоков — про другое.
+async fn split(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(given): Form<Splitting>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    match shared
+        .store
+        .split(id, &sre_domain::Stream::new(given.stream))
+        .await
+    {
+        Ok(Some(born)) => {
+            tracing::info!(from = id, born, who, "инцидент разделён");
+            Redirect::to(&format!("/incident/{born}")).into_response()
+        }
+        Ok(None) => failure(
+            StatusCode::BAD_REQUEST,
+            "выделять нечего: в инциденте один поток",
+        ),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
 }
 
 #[derive(Template)]
