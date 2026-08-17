@@ -408,3 +408,17 @@ async fn says_plainly_when_the_queue_did_not_reach() {
         .unwrap();
     assert!(page.contains("вывод пропущен"));
 }
+
+#[tokio::test]
+async fn breaks_a_long_number_into_groups() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent.enter("duty", SECRET).await.unwrap();
+    let page = agent
+        .inside(&format!("/incident/{id}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("91"));
+}

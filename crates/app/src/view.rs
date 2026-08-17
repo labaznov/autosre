@@ -70,6 +70,7 @@ impl Card {
                 "failed" => Some("разбор не удался: модель не ответила"),
                 "stale" => Some("разбор устарел и был закрыт"),
                 "running" => Some("разбор идёт"),
+                "unskilled" => Some("разбирать нечем: подходящего скилла нет"),
                 _ => None,
             }),
         }
@@ -93,11 +94,26 @@ fn lasting(began: Minute, last: Minute) -> String {
     }
 }
 
-/// Число без хвоста из нулей.
+/// Число, разбитое на разряды.
+///
+/// Единиц измерения агент не знает: у одной серии это байты, у другой запросы.
+/// Придумывать «МБ» значит однажды написать «751 МБ» там, где на самом деле
+/// секунды. Разряды же читаются всегда.
 fn number(value: f64) -> String {
-    if value.is_finite() {
-        format!("{value:.0}")
+    if !value.is_finite() {
+        return "∞".to_owned();
+    }
+    let whole = format!("{:.0}", value.abs());
+    let mut out = String::new();
+    for (index, digit) in whole.chars().enumerate() {
+        if index > 0 && (whole.len() - index).is_multiple_of(3) {
+            out.push('\u{202f}');
+        }
+        out.push(digit);
+    }
+    if value < 0.0 {
+        format!("−{out}")
     } else {
-        "∞".to_owned()
+        out
     }
 }

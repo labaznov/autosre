@@ -150,5 +150,5 @@ fn keeps_a_stray_pipe_out_of_a_query() {
 fn reads_the_shipped_skills() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/knowledge/skills");
-    assert_eq!(read(&path).unwrap().len(), 3);
+    assert_eq!(read(&path).unwrap().len(), 4);
 }

@@ -125,14 +125,27 @@ async fn skip(digger: &Digger, incident: &Incident) {
     }
 }
 
+/// Инцидент, для которого не нашлось скилла.
+async fn unskilled(digger: &Digger, incident: &Incident) {
+    let now = Minute::of(Utc::now());
+    if let Ok(investigation) = digger.store.dig(incident.id, "—", now).await {
+        let _ = digger.store.drop_dig(investigation, "unskilled").await;
+    }
+    tracing::info!(
+        incident = incident.id,
+        source = incident.source,
+        signature = incident.signature.as_str(),
+        "подходящего скилла нет: разбирать нечем"
+    );
+}
+
 /// Расследование одного инцидента.
 async fn investigate(digger: &Digger, incident: &Incident) {
     let Some(skill) = pick(digger, incident) else {
-        tracing::info!(
-            incident = incident.id,
-            source = incident.source,
-            "подходящего скилла нет, разбор не начат"
-        );
+        // Помечаем один раз, а не жалуемся каждую минуту: без пометки инцидент
+        // возвращается в очередь бесконечно, а дежурный так и не узнает, что
+        // разбирать его нечем.
+        unskilled(digger, incident).await;
         return;
     };
     let now = Minute::of(Utc::now());
