@@ -149,6 +149,19 @@ pub struct Filed {
     pub whole: bool,
 }
 
+/// Поток, за которым агент наблюдает.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Watched {
+    pub source: String,
+    pub stream: Stream,
+    /// Момент последнего снятого бакета.
+    pub last: Minute,
+    /// Сколько минутных бакетов накоплено.
+    pub buckets: u64,
+    /// Счётчик или уровень.
+    pub kind: Kind,
+}
+
 /// Найденная заметка.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recalled {
@@ -868,6 +881,35 @@ impl Store {
                   ORDER BY id",
             )?;
             let rows = query.query_map(params![incident], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// За чем агент наблюдает: потоки источника и их последние бакеты.
+    ///
+    /// Вопрос «а эту серию ты вообще видишь?» задаётся первым, и отвечать на
+    /// него чтением конфигурации неправильно: правило отбора говорит, что
+    /// агент просил, а этот список — что он получил.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn series(&self, limit: usize) -> Result<Vec<Watched>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT source, stream, MAX(at), COUNT(*), kind
+                   FROM buckets GROUP BY source, stream
+                  ORDER BY source, stream LIMIT ?1",
+            )?;
+            let rows = query.query_map(params![limit], |row| {
+                Ok(Watched {
+                    source: row.get(0)?,
+                    stream: Stream::new(row.get::<_, String>(1)?),
+                    last: Minute::at(row.get(2)?),
+                    buckets: row.get(3)?,
+                    kind: Kind::of(row.get(4)?),
+                })
+            })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
         .await

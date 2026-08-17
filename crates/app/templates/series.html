@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Наблюдение — Агент диагностики{% endblock %}
+
+{% block nav %}
+<nav>
+  {% include "badge.html" %}
+  <a href="/">к ленте</a>
+  <span class="who">{{ who }}</span>
+  <form method="post" action="/logout"><button class="plain">выйти</button></form>
+</nav>
+{% endblock %}
+
+{% block content %}
+<h1 class="page">За чем агент наблюдает</h1>
+
+{% if series.is_empty() %}
+  <p class="empty">Ряд пуст: ни одного бакета ещё не снято</p>
+{% endif %}
+
+{% if !series.is_empty() %}
+<table class="series">
+  <thead>
+    <tr><th>Источник</th><th>Поток</th><th>Вид</th><th>Бакетов</th><th>Последний</th></tr>
+  </thead>
+  <tbody>
+    {% for line in series %}
+      <tr>
+        <td>{{ line.source }}</td>
+        <td><code>{{ line.stream }}</code></td>
+        <td>{{ line.kind }}</td>
+        <td>{{ line.buckets }}</td>
+        <td>{{ line.last }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

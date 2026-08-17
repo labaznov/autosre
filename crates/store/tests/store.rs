@@ -1555,3 +1555,51 @@ async fn rewrites_a_report_built_twice() {
     }
     assert_eq!(base.store.reports(10).await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn names_the_streams_it_watches() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:01:00Z");
+    base.store
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 7.0)],
+        )
+        .await
+        .unwrap();
+    assert_eq!(base.store.series(10).await.unwrap()[0].stream, wifi());
+}
+
+#[tokio::test]
+async fn tells_a_level_from_a_counter_in_the_watched_list() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:01:00Z");
+    base.store
+        .save(
+            "metrics",
+            Span::single(at),
+            vec![Bucket::level(wifi(), at, 7.0)],
+        )
+        .await
+        .unwrap();
+    assert_eq!(base.store.series(10).await.unwrap()[0].kind, Kind::Mean);
+}
+
+#[tokio::test]
+async fn counts_the_buckets_of_a_watched_stream() {
+    let base = Base::open();
+    let first = minute("2026-08-17T10:01:00Z");
+    for step in 0..3 {
+        let at = first.back(-step);
+        base.store
+            .save(
+                "logs",
+                Span::single(at),
+                vec![Bucket::counted(wifi(), at, 7.0)],
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(base.store.series(10).await.unwrap()[0].buckets, 3);
+}

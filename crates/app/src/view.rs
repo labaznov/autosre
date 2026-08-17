@@ -286,6 +286,31 @@ impl Filed {
     }
 }
 
+/// Наблюдаемый поток в том виде, в каком его читает человек.
+pub struct Line {
+    pub source: String,
+    pub stream: String,
+    pub last: String,
+    pub buckets: u64,
+    pub kind: &'static str,
+}
+
+impl Line {
+    #[must_use]
+    pub fn of(watched: &sre_store::Watched) -> Self {
+        Self {
+            source: watched.source.clone(),
+            stream: watched.stream.to_string(),
+            last: moment(watched.last),
+            buckets: watched.buckets,
+            kind: match watched.kind {
+                sre_domain::Kind::Mean => "уровень",
+                sre_domain::Kind::Sum => "счётчик",
+            },
+        }
+    }
+}
+
 /// Момент в виде, годном для показа: наружу из этого модуля.
 #[must_use]
 pub fn when(minute: Minute) -> String {

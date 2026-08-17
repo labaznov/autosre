@@ -21,7 +21,7 @@ use crate::config::Knowledge;
 use crate::metrics::Metrics;
 use crate::reporter::{Reporter, single};
 use crate::session::{COOKIE, Doorman};
-use crate::view::{Card, Filed, Paper, Question, Silence};
+use crate::view::{Card, Filed, Line, Paper, Question, Silence};
 
 /// Стили: вшиты в бинарь, чтобы образ оставался одним файлом.
 const STYLE: &str = include_str!("../static/style.css");
@@ -88,6 +88,7 @@ pub fn routes(shared: Shared) -> Router {
         .route("/mute/{id}/lift", post(lift))
         .route("/incident/{id}/merge", post(merge))
         .route("/incident/{id}/split", post(split))
+        .route("/series", get(series))
         .route("/reports", get(shelf))
         .route("/report/{kind}/{name}", get(page))
         .route("/incident/{id}/report", post(sum_up))
@@ -254,6 +255,31 @@ async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
 /// Сколько всего ждёт руки дежурного: заявки плюс непринятые черновики.
 async fn waits(shared: &Shared) -> usize {
     pending(shared).await.len() + shared.store.unsettled(100).await.unwrap_or_default().len()
+}
+
+#[derive(Template)]
+#[template(path = "series.html")]
+struct Watch {
+    series: Vec<Line>,
+    who: String,
+    waiting: usize,
+}
+
+/// За чем агент наблюдает.
+///
+/// Первый вопрос дежурного к новому агенту — «а эту серию ты видишь?».
+/// Отвечать на него чтением конфигурации нельзя: правило отбора говорит, что
+/// агент просил, а этот список — что он получил.
+async fn series(State(shared): State<Shared>, headers: HeaderMap) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let watched = shared.store.series(500).await.unwrap_or_default();
+    render(&Watch {
+        series: watched.iter().map(Line::of).collect(),
+        who,
+        waiting: waits(&shared).await,
+    })
 }
 
 #[derive(Template)]

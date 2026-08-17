@@ -1001,3 +1001,42 @@ async fn keeps_the_reports_from_a_stranger() {
     let agent = Agent::start().await;
     assert_eq!(agent.get("/reports").await.status(), 303);
 }
+
+#[tokio::test]
+async fn shows_what_the_agent_watches() {
+    let agent = Agent::start().await;
+    let at = sre_domain::Minute::at(1_786_968_660);
+    let stream = sre_domain::Stream::new("{host=\"node-01\",service=\"orders-api\"}");
+    agent
+        .store
+        .save(
+            "logs",
+            sre_domain::Span::single(at),
+            vec![sre_domain::Bucket::counted(stream, at, 7.0)],
+        )
+        .await
+        .unwrap();
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent.inside("/series", &cookie).await.text().await.unwrap();
+    assert!(page.contains("orders-api"));
+}
+
+#[tokio::test]
+async fn says_the_series_are_empty_before_the_first_bucket() {
+    let agent = Agent::start().await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent.inside("/series", &cookie).await.text().await.unwrap();
+    assert!(page.contains("Ряд пуст"));
+}
+
+#[tokio::test]
+async fn keeps_the_series_from_a_stranger() {
+    let agent = Agent::start().await;
+    assert_eq!(agent.get("/series").await.status(), 303);
+}

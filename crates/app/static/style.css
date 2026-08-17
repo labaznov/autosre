@@ -194,3 +194,8 @@ nav form { display: inline; }
   margin: 0;
   overflow-x: auto;
 }
+
+.series { width: 100%; border-collapse: collapse; font-size: 13px; }
+.series th { text-align: left; color: var(--dim); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.series td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.series code { word-break: break-all; }
