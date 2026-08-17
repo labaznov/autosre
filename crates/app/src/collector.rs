@@ -23,11 +23,11 @@ pub fn collect(
     store: &Store,
     metrics: &Arc<Metrics>,
     settings: &Collector,
+    depth: Duration,
 ) {
     for source in sources {
         let store = store.clone();
         let metrics = Arc::clone(metrics);
-        let depth = settings.backfill;
         let chunk = settings.chunk;
         tokio::spawn(async move {
             heal(source.as_ref(), &store, &metrics, depth, chunk).await;

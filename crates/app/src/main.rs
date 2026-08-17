@@ -86,28 +86,16 @@ async fn serve() -> Result<(), Failure> {
 
     let metrics = Arc::new(Metrics::new(VERSION));
     let store = Store::open(&config.file.database)?;
-    let logs: Arc<dyn Source> = Arc::new(Logs::new(
-        &sre_logs::Settings {
-            url: config.file.logs.url.parse()?,
-            username: config.file.logs.username.clone(),
-            password: config.secrets.logs_password.clone(),
-            timeout: config.file.logs.timeout,
-            rows: 2000,
-        },
-        Filter::new(
-            &config.file.logs.error_pattern,
-            config.file.logs.self_streams.clone(),
-        )?,
-    )?);
-    let metrics_source: Arc<dyn Source> =
-        Arc::new(sre_metrics::Metrics::new(&sre_metrics::Settings {
-            url: config.file.metrics.url.parse()?,
-            timeout: config.file.metrics.timeout,
-            select: config.file.metrics.select.clone(),
-            labels: config.file.incidents.service_labels.clone(),
-        })?);
-    let sources = vec![logs, metrics_source];
-    collector::collect(sources.clone(), &store, &metrics, &config.file.collector);
+    let sources = sources(&config)?;
+    let depth = config.file.depth();
+    tracing::info!(minutes = depth.as_secs() / 60, "дозапрос истории на старте");
+    collector::collect(
+        sources.clone(),
+        &store,
+        &metrics,
+        &config.file.collector,
+        depth,
+    );
     collector::tidy(&sources, &store, &config.file.retention);
     watcher::watch(&sources, &store, &metrics, &config.file.enabled());
     let model = Arc::new(sre_model::Model::new(sre_model::Settings {
@@ -177,6 +165,33 @@ async fn serve() -> Result<(), Failure> {
         .with_graceful_shutdown(stop())
         .await?;
     Ok(())
+}
+
+/// Источники наблюдений: логи и метрики.
+///
+/// Оба за одной границей ([ADR-0004](../../../docs/adr/0004-connectors-as-features.md)),
+/// поэтому дальше по коду они неразличимы.
+fn sources(config: &Config) -> Result<Vec<Arc<dyn Source>>, Failure> {
+    let logs: Arc<dyn Source> = Arc::new(Logs::new(
+        &sre_logs::Settings {
+            url: config.file.logs.url.parse()?,
+            username: config.file.logs.username.clone(),
+            password: config.secrets.logs_password.clone(),
+            timeout: config.file.logs.timeout,
+            rows: 2000,
+        },
+        Filter::new(
+            &config.file.logs.error_pattern,
+            config.file.logs.self_streams.clone(),
+        )?,
+    )?);
+    let numbers: Arc<dyn Source> = Arc::new(sre_metrics::Metrics::new(&sre_metrics::Settings {
+        url: config.file.metrics.url.parse()?,
+        timeout: config.file.metrics.timeout,
+        select: config.file.metrics.select.clone(),
+        labels: config.file.incidents.service_labels.clone(),
+    })?);
+    Ok(vec![logs, numbers])
 }
 
 /// Ждёт сигнала остановки, чтобы дорисовать текущие запросы.

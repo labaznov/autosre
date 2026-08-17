@@ -407,6 +407,24 @@ impl File {
     pub fn enabled(&self) -> Vec<&Horizon> {
         self.horizons.iter().filter(|it| it.enabled).collect()
     }
+
+    /// Насколько глубоко дозапрашивать историю при старте.
+    ///
+    /// Не меньше, чем нужно самому короткому горизонту на базовую линию:
+    /// иначе после чистого старта агент слеп ровно столько, сколько копит ряд,
+    /// и никто об этом не догадывается — в журнале только «базовой линии ещё
+    /// нет». Настройка остаётся, но поднять её агент может и сам: сколько ему
+    /// надо, знает он, а не тот, кто правит файл.
+    #[must_use]
+    pub fn depth(&self) -> Duration {
+        let needed = self
+            .enabled()
+            .iter()
+            .map(|horizon| horizon.width * u32::try_from(horizon.history + 1).unwrap_or(25))
+            .min()
+            .unwrap_or_default();
+        self.collector.backfill.max(needed)
+    }
 }
 
 fn collect(section: &str, rest: &BTreeMap<String, toml::Value>, found: &mut Vec<String>) {

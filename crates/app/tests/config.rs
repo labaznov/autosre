@@ -227,3 +227,21 @@ fn reads_the_shipped_example() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/sreagent.toml");
     assert!(Config::read(&path, &full()).unwrap().unknown.is_empty());
 }
+
+#[test]
+fn digs_deep_enough_for_the_shortest_horizon() {
+    let settings = Settings::of(&format!(
+        "{ENOUGH}history = 24\n\n[collector]\nbackfill = \"2h\"\n"
+    ));
+    let config = settings.read(&full()).unwrap();
+    assert_eq!(config.file.depth().as_secs() / 60, 375);
+}
+
+#[test]
+fn keeps_a_backfill_deeper_than_the_baseline() {
+    let settings = Settings::of(&format!(
+        "{ENOUGH}history = 24\n\n[collector]\nbackfill = \"24h\"\n"
+    ));
+    let config = settings.read(&full()).unwrap();
+    assert_eq!(config.file.depth().as_secs() / 3600, 24);
+}
