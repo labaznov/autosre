@@ -21,6 +21,7 @@ pub struct Metrics {
     sifted: AtomicU64,
     concluded: AtomicU64,
     skipped: AtomicU64,
+    notes: AtomicU64,
     inquiries: AtomicU64,
     answered: AtomicU64,
 }
@@ -38,6 +39,7 @@ impl Metrics {
             sifted: AtomicU64::new(0),
             concluded: AtomicU64::new(0),
             skipped: AtomicU64::new(0),
+            notes: AtomicU64::new(0),
             inquiries: AtomicU64::new(0),
             answered: AtomicU64::new(0),
         }
@@ -72,6 +74,12 @@ impl Metrics {
     /// Отмечает инцидент, дошедший до дежурного без вывода.
     pub fn skipped(&self) {
         self.skipped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Запоминает, сколько заметок в поисковом индексе.
+    pub fn notes(&self, count: usize) {
+        self.notes
+            .store(count.try_into().unwrap_or(0), Ordering::Relaxed);
     }
 
     /// Отмечает оставленную дежурному заявку.
@@ -147,6 +155,12 @@ impl Metrics {
             "sre_skipped_total",
             "Инциденты, дошедшие до дежурного без вывода",
             &self.skipped.load(Ordering::Relaxed).to_string(),
+        );
+        gauge(
+            &mut out,
+            "sre_notes",
+            "Заметки базы знаний в поисковом индексе",
+            &self.notes.load(Ordering::Relaxed).to_string(),
         );
         counter(
             &mut out,

@@ -164,4 +164,19 @@ pub const STEPS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS inquiries_open ON inquiries (state, asked);
     CREATE INDEX IF NOT EXISTS inquiries_incident ON inquiries (incident);
     ",
+    // 8. Поисковый индекс базы знаний.
+    //
+    // Не хранилище заметок, а именно индекс: сами заметки лежат файлами в чужом
+    // репозитории ([ADR-0015](../../../docs/adr/0015-knowledge-repository.md)),
+    // и правда о них там. Индекс собирается заново при старте и после правок,
+    // поэтому потерять его не страшно.
+    //
+    // Колонки разделены не ради красоты: у сигнатур и тегов свой вес в BM25.
+    // `ECONNRESET` в сигнатуре означает «заметка про это», в теле — «здесь
+    // такое упоминалось» ([ADR-0008](../../../docs/adr/0008-full-text-knowledge-search.md)).
+    "
+    CREATE VIRTUAL TABLE IF NOT EXISTS notes USING fts5 (
+        name, title, tags, marks, body, tokenize = 'unicode61 remove_diacritics 2'
+    );
+    ",
 ];

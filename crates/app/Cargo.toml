@@ -26,6 +26,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
 sre-domain = { path = "../domain" }
+sre-knowledge = { path = "../knowledge" }
 sre-logs = { path = "../logs" }
 sre-metrics = { path = "../metrics" }
 sre-model = { path = "../model" }

@@ -1331,6 +1331,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sre-domain",
+ "sre-knowledge",
  "sre-logs",
  "sre-metrics",
  "sre-model",
@@ -1354,6 +1355,17 @@ dependencies = [
  "regex",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "sre-knowledge"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]

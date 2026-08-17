@@ -979,3 +979,115 @@ async fn spares_a_fresh_inquiry_from_fading() {
         0
     );
 }
+
+/// Заметка для индекса: имя, заголовок, теги, сигнатуры, тело.
+fn memory(name: &str, tags: &str, marks: &str, body: &str) -> sre_store::Memory {
+    sre_store::Memory {
+        name: name.to_owned(),
+        title: format!("заметка {name}"),
+        tags: tags.to_owned(),
+        marks: marks.to_owned(),
+        body: body.to_owned(),
+    }
+}
+
+/// База с двумя заметками в индексе.
+async fn learned() -> Base {
+    let base = Base::open();
+    base.store
+        .remember(vec![
+            memory(
+                "vl-no-space-left",
+                "диск место victorialogs",
+                "no space left on device ENOSPC",
+                "Процессу отказано в записи на разделе",
+            ),
+            memory(
+                "litellm-timeouts",
+                "таймаут прокси litellm",
+                "upstream timed out",
+                "Прокси не дождался ответа модели",
+            ),
+        ])
+        .await
+        .unwrap();
+    base
+}
+
+#[tokio::test]
+async fn counts_the_notes_it_indexed() {
+    assert_eq!(learned().await.store.notes().await.unwrap(), 2);
+}
+
+#[tokio::test]
+async fn finds_a_note_by_the_signature_of_an_error() {
+    let base = learned().await;
+    let found = base
+        .store
+        .recall("no space left on device", 3)
+        .await
+        .unwrap();
+    assert_eq!(found[0].name, "vl-no-space-left");
+}
+
+#[tokio::test]
+async fn finds_a_note_by_a_russian_synonym() {
+    let base = learned().await;
+    let found = base.store.recall("кончился диск", 3).await.unwrap();
+    assert_eq!(found[0].name, "vl-no-space-left");
+}
+
+#[tokio::test]
+async fn puts_the_closest_note_first() {
+    let base = learned().await;
+    let found = base
+        .store
+        .recall("upstream timed out прокси", 3)
+        .await
+        .unwrap();
+    assert_eq!(found[0].name, "litellm-timeouts");
+}
+
+#[tokio::test]
+async fn finds_nothing_for_words_of_another_world() {
+    let base = learned().await;
+    assert!(
+        base.store
+            .recall("вертолёт капуста", 3)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn survives_a_signature_full_of_search_syntax() {
+    let base = learned().await;
+    let found = base
+        .store
+        .recall("(no space left) * \"on device\"", 3)
+        .await;
+    assert!(found.is_ok());
+}
+
+#[tokio::test]
+async fn asks_nothing_when_there_are_no_words() {
+    let base = learned().await;
+    assert!(base.store.recall("а и в", 3).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn keeps_only_the_last_reading_of_the_directory() {
+    let base = learned().await;
+    base.store
+        .remember(vec![memory("one", "теги", "марки", "тело")])
+        .await
+        .unwrap();
+    assert_eq!(base.store.notes().await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn holds_the_asked_number_of_notes() {
+    let base = learned().await;
+    assert_eq!(base.store.recall("диск таймаут", 1).await.unwrap().len(), 1);
+}

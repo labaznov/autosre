@@ -7,7 +7,7 @@ use std::sync::Arc;
 use sre_app::config::{Config, Process};
 use sre_app::metrics::Metrics;
 use sre_app::session::Doorman;
-use sre_app::{VERSION, collector, digger, grouper, watcher, web};
+use sre_app::{VERSION, collector, digger, grouper, librarian, watcher, web};
 use sre_logs::{Filter, Logs};
 use sre_source::Source;
 use sre_store::Store;
@@ -119,6 +119,9 @@ async fn serve() -> Result<(), Failure> {
         timeout: config.file.model.timeout,
     })?);
     grouper::group(&sources, &store, &metrics, &model, &config.file.incidents);
+
+    librarian::learn(&store, &metrics, &config.file.knowledge).await;
+    librarian::keep(&store, &metrics, &config.file.knowledge);
 
     let skills = sre_skills::read(&config.file.digging.skills).unwrap_or_else(|failure| {
         tracing::warn!(

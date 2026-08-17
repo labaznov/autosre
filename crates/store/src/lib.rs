@@ -58,6 +58,29 @@ pub struct Asked {
     pub answer: Option<String>,
 }
 
+/// Заметка в том виде, в каком её принимает индекс.
+///
+/// Пять строк, и ни одного знания о том, откуда они взялись: хранилище не
+/// читает файлов и не знает про фронтматтер.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Memory {
+    pub name: String,
+    pub title: String,
+    pub tags: String,
+    pub marks: String,
+    pub body: String,
+}
+
+/// Найденная заметка.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Recalled {
+    pub name: String,
+    pub title: String,
+    pub body: String,
+    /// Оценка BM25: чем меньше, тем ближе. Так считает `SQLite`.
+    pub score: f64,
+}
+
 /// База наблюдений.
 #[derive(Debug, Clone)]
 pub struct Store {
@@ -768,6 +791,77 @@ impl Store {
         .await
     }
 
+    /// Пересобирает поисковый индекс базы знаний.
+    ///
+    /// Целиком, а не по одной заметке: правки приходят из чужого репозитория
+    /// пачкой, и разбираться, что там изменилось, дороже, чем переписать
+    /// индекс на сотне заметок.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn remember(&self, notes: Vec<Memory>) -> Result<usize, StoreError> {
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            change.execute("DELETE FROM notes", [])?;
+            {
+                let mut put = change.prepare(
+                    "INSERT INTO notes (name, title, tags, marks, body)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                )?;
+                for note in &notes {
+                    put.execute(params![
+                        note.name, note.title, note.tags, note.marks, note.body
+                    ])?;
+                }
+            }
+            change.commit()?;
+            Ok(notes.len())
+        })
+        .await
+    }
+
+    /// Ищет заметки, похожие на описанное словами.
+    ///
+    /// Слова приходят из сигнатуры, имени сервиса и подозрения; редкие токены
+    /// вроде `ECONNRESET` и делают попадание точным. Вес колонок неравный:
+    /// сигнатура весит вчетверо против тела.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn recall(&self, words: &str, limit: usize) -> Result<Vec<Recalled>, StoreError> {
+        let Some(query) = terms(words) else {
+            return Ok(Vec::new());
+        };
+        self.work(move |db| {
+            let mut search = db.prepare(
+                "SELECT name, title, body, bm25(notes, 1.0, 2.0, 4.0, 8.0, 1.0)
+                   FROM notes WHERE notes MATCH ?1
+                  ORDER BY bm25(notes, 1.0, 2.0, 4.0, 8.0, 1.0) LIMIT ?2",
+            )?;
+            let rows = search.query_map(params![query, limit], |row| {
+                Ok(Recalled {
+                    name: row.get(0)?,
+                    title: row.get(1)?,
+                    body: row.get(2)?,
+                    score: row.get(3)?,
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Сколько заметок в индексе.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn notes(&self) -> Result<u64, StoreError> {
+        self.work(move |db| {
+            Ok(db.query_row("SELECT COUNT(*) FROM notes", [], |row| row.get::<_, u64>(0))?)
+        })
+        .await
+    }
+
     /// Помечает расследование неудавшимся или брошенным.
     ///
     /// # Errors
@@ -1200,6 +1294,39 @@ fn close(
     )?;
     change.commit()?;
     Ok(Some(incident))
+}
+
+/// Сколько слов уходит в поисковый запрос.
+///
+/// Больше дюжины — и запрос начинает находить всё подряд: редкие токены тонут
+/// среди частых, и ранжирование перестаёт что-либо значить.
+const WORDS: usize = 12;
+
+/// Превращает описание словами в запрос к полнотекстовому индексу.
+///
+/// Единственный путь чужому тексту попасть в `MATCH`. Сигнатура ошибки полна
+/// кавычек, звёздочек и скобок — всё это синтаксис FTS5, и без разбора на
+/// слова запрос либо не разберётся, либо найдёт не то.
+fn terms(words: &str) -> Option<String> {
+    let mut seen = Vec::new();
+    for word in words
+        .split(|it: char| !it.is_alphanumeric())
+        .map(str::to_lowercase)
+        .filter(|it| it.chars().count() >= 3)
+    {
+        if !seen.contains(&word) {
+            seen.push(word);
+        }
+        if seen.len() == WORDS {
+            break;
+        }
+    }
+    (!seen.is_empty()).then(|| {
+        seen.iter()
+            .map(|word| format!("\"{word}\""))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    })
 }
 
 /// Заявка из строки таблицы.

@@ -103,6 +103,8 @@ pub struct File {
     #[serde(default)]
     pub digging: Digging,
     #[serde(default)]
+    pub knowledge: Knowledge,
+    #[serde(default)]
     pub queue: Queue,
     #[serde(default)]
     pub retention: Retention,
@@ -261,6 +263,23 @@ pub struct Digging {
     rest: BTreeMap<String, toml::Value>,
 }
 
+/// База знаний: рабочая копия чужого репозитория.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Knowledge {
+    /// Каталог принятых заметок.
+    #[serde(default = "default_notes")]
+    pub notes: PathBuf,
+    /// Как часто перечитывать каталог: заметки правят люди, и агент обязан
+    /// узнать об этом без перезапуска.
+    #[serde(default = "default_refresh", with = "humantime_serde")]
+    pub refresh: Duration,
+    /// Сколько заметок уходит в досье расследования.
+    #[serde(default = "default_recall")]
+    pub recall: usize,
+    #[serde(flatten)]
+    rest: BTreeMap<String, toml::Value>,
+}
+
 /// Очередь расследований.
 #[derive(Debug, Deserialize)]
 pub struct Queue {
@@ -361,6 +380,7 @@ impl File {
         collect("collector", &self.collector.rest, &mut found);
         collect("incidents", &self.incidents.rest, &mut found);
         collect("digging", &self.digging.rest, &mut found);
+        collect("knowledge", &self.knowledge.rest, &mut found);
         collect("queue", &self.queue.rest, &mut found);
         collect("retention", &self.retention.rest, &mut found);
         for horizon in &self.horizons {
@@ -442,6 +462,30 @@ impl Default for Digging {
             patience: default_patience(),
             tick: default_tick(),
             answer: default_answer(),
+            rest: BTreeMap::new(),
+        }
+    }
+}
+
+impl Knowledge {
+    /// Те же настройки, но с другим каталогом заметок и другим шагом обхода:
+    /// на стенде база знаний лежит во временной папке и правится на ходу.
+    #[must_use]
+    pub fn shelf(self, notes: PathBuf, refresh: Duration) -> Self {
+        Self {
+            notes,
+            refresh,
+            ..self
+        }
+    }
+}
+
+impl Default for Knowledge {
+    fn default() -> Self {
+        Self {
+            notes: default_notes(),
+            refresh: default_refresh(),
+            recall: default_recall(),
             rest: BTreeMap::new(),
         }
     }
@@ -549,6 +593,15 @@ fn default_chunk() -> Duration {
 }
 fn default_drift() -> f64 {
     0.15
+}
+fn default_notes() -> PathBuf {
+    PathBuf::from("/opt/data/sreagent/knowledge/notes")
+}
+fn default_refresh() -> Duration {
+    Duration::from_mins(5)
+}
+fn default_recall() -> usize {
+    3
 }
 fn default_skills() -> PathBuf {
     PathBuf::from("/opt/data/sreagent/knowledge/skills")

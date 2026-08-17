@@ -2,6 +2,7 @@
 members = [
     "crates/app",
     "crates/domain",
+    "crates/knowledge",
     "crates/logs",
     "crates/metrics",
     "crates/model",
