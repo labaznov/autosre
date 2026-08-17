@@ -21,6 +21,7 @@ async fn answer(_body: String) -> &'static str {
 struct Desk {
     store: Store,
     reporter: Reporter,
+    model: Arc<Model>,
     knowledge: TempDir,
     _directory: TempDir,
 }
@@ -62,6 +63,7 @@ impl Desk {
         Self {
             store,
             reporter,
+            model,
             knowledge,
             _directory: directory,
         }
@@ -320,4 +322,60 @@ async fn builds_a_weekly_report_once() {
     weekly(&desk.reporter).await;
     weekly(&desk.reporter).await;
     assert_eq!(desk.store.reports(10).await.unwrap().len(), 1);
+}
+
+/// Стенд с недоступной моделью: общая картина написана не будет.
+async fn mute_desk() -> Desk {
+    let desk = Desk::open().await;
+    Desk {
+        reporter: Reporter::new(
+            &desk.store,
+            &Arc::new(Metrics::new("тест")),
+            &Arc::new(
+                Model::new(Settings {
+                    url: "http://127.0.0.1:1/".parse().expect("адрес некорректен"),
+                    key: "sk-lab".to_owned(),
+                    name: "недоступная".to_owned(),
+                    temperature: 0.2,
+                    tokens: 300,
+                    timeout: Duration::from_millis(300),
+                })
+                .expect("клиент не собрался"),
+            ),
+            &Knowledge::default().filing(desk.knowledge.path().join("reports")),
+            &Incidents::default(),
+        ),
+        ..desk
+    }
+}
+
+#[tokio::test]
+async fn files_a_report_even_without_the_model() {
+    let desk = mute_desk().await;
+    daily(&desk.reporter).await;
+    assert_eq!(desk.store.reports(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn marks_a_report_without_a_picture_as_partial() {
+    let desk = mute_desk().await;
+    daily(&desk.reporter).await;
+    assert!(!desk.store.reports(10).await.unwrap()[0].whole);
+}
+
+#[tokio::test]
+async fn builds_a_partial_report_again_when_the_model_returns() {
+    let desk = mute_desk().await;
+    daily(&desk.reporter).await;
+    let whole = Desk::open().await;
+    // Та же база, но модель отвечает: отчёт обязан пересобраться.
+    let reporter = Reporter::new(
+        &desk.store,
+        &Arc::new(Metrics::new("тест")),
+        &whole.model,
+        &Knowledge::default().filing(desk.knowledge.path().join("reports")),
+        &Incidents::default(),
+    );
+    daily(&reporter).await;
+    assert!(desk.store.reports(10).await.unwrap()[0].whole);
 }

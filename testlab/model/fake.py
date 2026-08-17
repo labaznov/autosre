@@ -15,6 +15,7 @@ import re
 import sys
 
 SEEN = set()
+ASKED = []
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -26,6 +27,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if kind == "conclusion":
             answer = self.conclusion(user)
+        elif kind == "picture":
+            answer = self.picture(user)
         else:
             answer = self.triage(user)
 
@@ -55,16 +58,48 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         Просьба ровно одна за расследование: так проверяется, что ограничение
         шагов работает и что агент не зацикливается.
+
+        Первое расследование за прогон вместо добора просит человека выполнить
+        команду: так в лаборатории проверяется петля заявки. Одно на прогон —
+        иначе агент застрянет в ожидании ответов и ничего не разберёт.
         """
         service = re.search(r"Сервис: (.+)", user)
         service = service.group(1) if service else "сервис"
+        answered = "ответы дежурного" in user
         wider = "добор:" in user
-        print(f"разбор: {service} {'после добора' if wider else 'первый заход'}", file=sys.stderr, flush=True)
-        return {
+        if not ASKED and not answered:
+            ASKED.append(service)
+            print(f"разбор: {service} — заявка дежурному", file=sys.stderr, flush=True)
+            return {
+                "cause": f"{service}: похоже на нехватку места, но метрики диска нет",
+                "confidence": 0.3,
+                "advice": "посмотреть, сколько осталось на разделе с данными",
+                "need": "ask",
+                "host": service,
+                "command": "df -h /var",
+            }
+        found = re.search(r"^## ([\w-]+) —", user, re.M)
+        print(
+            f"разбор: {service} {'после ответа' if answered else 'после добора' if wider else 'первый заход'}",
+            file=sys.stderr,
+            flush=True,
+        )
+        answer = {
             "cause": f"{service}: судя по сигнатурам, отвечает не он, а то, от чего он зависит",
-            "confidence": 0.7 if wider else 0.4,
+            "confidence": 0.8 if answered else 0.7 if wider else 0.4,
             "advice": "проверить соседей по цепочке и последние выкаты",
-            "need": "nothing" if wider else "logs",
+            "need": "nothing" if (wider or answered) else "logs",
+        }
+        if found:
+            answer["note"] = found.group(1)
+        return answer
+
+    def picture(self, user):
+        """Общая картина отчёта: пересказ чисел одной фразой."""
+        print("отчёт: общая картина", file=sys.stderr, flush=True)
+        first = user.splitlines()[1] if len(user.splitlines()) > 1 else user[:80]
+        return {
+            "picture": f"Хозяйство держится. {first} Смотреть завтра на самых шумных.",
         }
 
     def log_message(self, *args):

@@ -70,7 +70,9 @@ pub fn report(reporter: Reporter) {
 pub async fn daily(reporter: &Reporter) {
     let day = Utc::now().date_naive().pred_opt().unwrap_or_default();
     let name = day.format("%Y-%m-%d").to_string();
-    if let Ok(Some(_)) = reporter.store.report("daily", &name).await {
+    if let Ok(Some(report)) = reporter.store.report("daily", &name).await
+        && report.whole
+    {
         return;
     }
     let Some(from) = midnight(day.and_hms_opt(0, 0, 0).map(|it| it.and_utc().timestamp())) else {
@@ -81,8 +83,16 @@ pub async fn daily(reporter: &Reporter) {
         tracing::error!("суточный отчёт не собран: свод не прочитан");
         return;
     };
-    let body = day_page(reporter, &digest, &name).await;
-    keep(reporter, "daily", &name, &format!("Сутки {name}"), &body).await;
+    let (body, whole) = day_page(reporter, &digest, &name).await;
+    keep(
+        reporter,
+        "daily",
+        &name,
+        &format!("Сутки {name}"),
+        &body,
+        whole,
+    )
+    .await;
 }
 
 /// Недельный отчёт за прошлую неделю, если его ещё нет.
@@ -90,7 +100,9 @@ pub async fn weekly(reporter: &Reporter) {
     let now = Utc::now();
     let past = now - chrono::Duration::days(7);
     let name = format!("{}-W{:02}", past.iso_week().year(), past.iso_week().week());
-    if let Ok(Some(_)) = reporter.store.report("weekly", &name).await {
+    if let Ok(Some(report)) = reporter.store.report("weekly", &name).await
+        && report.whole
+    {
         return;
     }
     let start = past
@@ -107,8 +119,16 @@ pub async fn weekly(reporter: &Reporter) {
         tracing::error!("недельный отчёт не собран: свод не прочитан");
         return;
     };
-    let body = week_page(reporter, &digest, &name).await;
-    keep(reporter, "weekly", &name, &format!("Неделя {name}"), &body).await;
+    let (body, whole) = week_page(reporter, &digest, &name).await;
+    keep(
+        reporter,
+        "weekly",
+        &name,
+        &format!("Неделя {name}"),
+        &body,
+        whole,
+    )
+    .await;
 }
 
 /// Отчёт по инциденту: что было, что выяснил агент, что делал человек.
@@ -145,6 +165,7 @@ pub async fn single(reporter: &Reporter, incident: i64) -> Option<String> {
         &name,
         &format!("{} — {}", found.service, found.signature),
         &page,
+        true,
     )
     .await;
     Some(name)
@@ -247,18 +268,19 @@ fn handled(found: &Incident, drafts: &[sre_store::Written]) -> String {
     part
 }
 
-/// Суточный отчёт: четыре части.
-async fn day_page(reporter: &Reporter, digest: &Digest, name: &str) -> String {
+/// Суточный отчёт: четыре части. Вторым числом — собран ли он целиком.
+async fn day_page(reporter: &Reporter, digest: &Digest, name: &str) -> (String, bool) {
     let mut page = format!("# Сутки {name}\n\n");
     page.push_str(&incidents_part(digest));
     page.push_str(&anomalies_part(digest));
     page.push_str(&dynamics_part(reporter, digest));
-    page.push_str(&overall(reporter, digest, "сутки").await);
-    page
+    let (picture, whole) = overall(reporter, digest, "сутки").await;
+    page.push_str(&picture);
+    (page, whole)
 }
 
 /// Недельный отчёт: четыре части для читателя, не знающего устройства агента.
-async fn week_page(reporter: &Reporter, digest: &Digest, name: &str) -> String {
+async fn week_page(reporter: &Reporter, digest: &Digest, name: &str) -> (String, bool) {
     let mut page = format!("# Неделя {name}\n\n");
     let seen = digest.opened.len() + digest.still.len();
     let _ = writeln!(
@@ -301,11 +323,12 @@ async fn week_page(reporter: &Reporter, digest: &Digest, name: &str) -> String {
         digest.inquiries,
         digest.notes,
     );
-    page.push_str(&overall(reporter, digest, "неделю").await);
+    let (picture, whole) = overall(reporter, digest, "неделю").await;
+    page.push_str(&picture);
     if seen == 0 {
         page.push_str("\nЗа неделю не заведено ни одного инцидента. Это либо спокойная неделя, либо ослепший агент — второе проверяется метрикой `sre_last_bucket_timestamp_seconds`.\n");
     }
-    page
+    (page, whole)
 }
 
 /// Часть «инциденты».
@@ -421,7 +444,7 @@ fn ratio(now: u64, was: u64) -> f64 {
 ///
 /// Модель молчит — часть не выдумывается, а честно отсутствует: числа выше
 /// сами по себе полезны, а придуманный вывод хуже, чем никакого.
-async fn overall(reporter: &Reporter, digest: &Digest, span: &str) -> String {
+async fn overall(reporter: &Reporter, digest: &Digest, span: &str) -> (String, bool) {
     let facts = format!(
         "Промежуток: {span}.\nИнцидентов заведено: {}, закрыто: {}, осталось открытыми: {}.\nОтклонений: {}, отсеяно: {}, приглушено: {}.\nВыводов: {}, заявок: {}.\nСамые шумные: {}.",
         digest.opened.len(),
@@ -441,18 +464,21 @@ async fn overall(reporter: &Reporter, digest: &Digest, span: &str) -> String {
             .join(", "),
     );
     match reporter.model.summary(&facts).await {
-        Ok(picture) => format!("## Общая картина\n\n{picture}\n"),
+        Ok(picture) => (format!("## Общая картина\n\n{picture}\n"), true),
         Err(failure) => {
             reporter.metrics.failure();
-            tracing::warn!(%failure, "общая картина отчёта не написана");
-            "## Общая картина\n\nНе собрана: модель не ответила. Числа выше — всё, что есть.\n"
-                .to_owned()
+            tracing::warn!(%failure, "общая картина отчёта не написана, отчёт пересоберётся");
+            (
+                "## Общая картина\n\nНе собрана: модель не ответила. Числа выше — всё, что есть.\n"
+                    .to_owned(),
+                false,
+            )
         }
     }
 }
 
 /// Кладёт отчёт в базу и файлом в репозиторий знаний.
-async fn keep(reporter: &Reporter, kind: &str, name: &str, title: &str, body: &str) {
+async fn keep(reporter: &Reporter, kind: &str, name: &str, title: &str, body: &str, whole: bool) {
     let path = reporter
         .knowledge
         .reports
@@ -470,11 +496,14 @@ async fn keep(reporter: &Reporter, kind: &str, name: &str, title: &str, body: &s
     match reporter
         .store
         .file(
-            kind,
-            name,
-            title,
-            &path.to_string_lossy(),
-            body,
+            sre_store::Filing {
+                kind,
+                name,
+                title,
+                path: &path.to_string_lossy(),
+                body,
+                whole,
+            },
             Minute::of(Utc::now()),
         )
         .await

@@ -125,6 +125,18 @@ pub struct Digest {
     pub mutes: Vec<Muted>,
 }
 
+/// Что кладут в отчёт: слишком много строк, чтобы передавать их по одной.
+#[derive(Debug, Clone, Copy)]
+pub struct Filing<'a> {
+    pub kind: &'a str,
+    pub name: &'a str,
+    pub title: &'a str,
+    pub path: &'a str,
+    pub body: &'a str,
+    /// Собран ли целиком.
+    pub whole: bool,
+}
+
 /// Отчёт в том виде, в каком его читают.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filed {
@@ -133,6 +145,8 @@ pub struct Filed {
     pub title: String,
     pub made: Minute,
     pub body: String,
+    /// Собран ли целиком: без общей картины отчёт неполон и пересоберётся.
+    pub whole: bool,
 }
 
 /// Найденная заметка.
@@ -943,25 +957,18 @@ impl Store {
     ///
     /// # Errors
     /// [`StoreError::Sqlite`] на отказе записи.
-    pub async fn file(
-        &self,
-        kind: &str,
-        name: &str,
-        title: &str,
-        path: &str,
-        body: &str,
-        at: Minute,
-    ) -> Result<i64, StoreError> {
-        let (kind, name) = (kind.to_owned(), name.to_owned());
-        let (title, path, body) = (title.to_owned(), path.to_owned(), body.to_owned());
+    pub async fn file(&self, filing: Filing<'_>, at: Minute) -> Result<i64, StoreError> {
+        let (kind, name) = (filing.kind.to_owned(), filing.name.to_owned());
+        let (title, path) = (filing.title.to_owned(), filing.path.to_owned());
+        let (body, whole) = (filing.body.to_owned(), filing.whole);
         self.work(move |db| {
             db.execute(
-                "INSERT INTO reports (kind, name, title, path, made, body)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO reports (kind, name, title, path, made, body, whole)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT (kind, name) DO UPDATE SET
                     title = excluded.title, path = excluded.path,
-                    made = excluded.made, body = excluded.body",
-                params![kind, name, title, path, at.stamp(), body],
+                    made = excluded.made, body = excluded.body, whole = excluded.whole",
+                params![kind, name, title, path, at.stamp(), body, i64::from(whole)],
             )?;
             Ok(db.last_insert_rowid())
         })
@@ -977,7 +984,7 @@ impl Store {
         self.work(move |db| {
             Ok(db
                 .query_row(
-                    "SELECT kind, name, title, made, body FROM reports
+                    "SELECT kind, name, title, made, body, whole FROM reports
                       WHERE kind = ?1 AND name = ?2",
                     params![kind, name],
                     read_report,
@@ -994,7 +1001,7 @@ impl Store {
     pub async fn reports(&self, limit: usize) -> Result<Vec<Filed>, StoreError> {
         self.work(move |db| {
             let mut query = db.prepare(
-                "SELECT kind, name, title, made, body FROM reports
+                "SELECT kind, name, title, made, body, whole FROM reports
                   ORDER BY made DESC, id DESC LIMIT ?1",
             )?;
             let rows = query.query_map(params![limit], read_report)?;
@@ -2018,6 +2025,7 @@ fn read_report(row: &rusqlite::Row<'_>) -> rusqlite::Result<Filed> {
         title: row.get(2)?,
         made: Minute::at(row.get(3)?),
         body: row.get(4)?,
+        whole: row.get::<_, i64>(5)? == 1,
     })
 }
 

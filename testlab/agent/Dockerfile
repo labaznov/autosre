@@ -7,7 +7,10 @@ COPY crates ./crates
 RUN cargo build --release --bin sreagent
 
 FROM alpine:3.22
-RUN adduser -D -u 10001 sre && mkdir -p /opt/data/sreagent && chown sre /opt/data/sreagent
+RUN apk add --no-cache git \
+ && adduser -D -u 10001 sre \
+ && mkdir -p /opt/data/sreagent \
+ && chown sre /opt/data/sreagent
 COPY --from=build /src/target/release/sreagent /usr/local/bin/sreagent
 USER sre
 EXPOSE 8096

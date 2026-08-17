@@ -1518,21 +1518,23 @@ async fn compares_a_stream_with_the_window_before() {
     assert_eq!((digest.streams[0].1, digest.streams[0].2), (3, 1));
 }
 
+/// Отчёт, готовый лечь в базу.
+fn filing(body: &str) -> sre_store::Filing<'_> {
+    sre_store::Filing {
+        kind: "daily",
+        name: "2026-08-17",
+        title: "Сутки",
+        path: "reports/daily/x.md",
+        body,
+        whole: true,
+    }
+}
+
 #[tokio::test]
 async fn keeps_a_report_where_it_can_be_found() {
     let base = Base::open();
     let at = minute("2026-08-17T10:15:00Z");
-    base.store
-        .file(
-            "daily",
-            "2026-08-17",
-            "Сутки",
-            "reports/daily/x.md",
-            "# тело",
-            at,
-        )
-        .await
-        .unwrap();
+    base.store.file(filing("# тело"), at).await.unwrap();
     assert_eq!(
         base.store
             .report("daily", "2026-08-17")
@@ -1549,17 +1551,7 @@ async fn rewrites_a_report_built_twice() {
     let base = Base::open();
     let at = minute("2026-08-17T10:15:00Z");
     for body in ["первое", "второе"] {
-        base.store
-            .file(
-                "daily",
-                "2026-08-17",
-                "Сутки",
-                "reports/daily/x.md",
-                body,
-                at,
-            )
-            .await
-            .unwrap();
+        base.store.file(filing(body), at).await.unwrap();
     }
     assert_eq!(base.store.reports(10).await.unwrap().len(), 1);
 }

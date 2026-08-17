@@ -924,11 +924,14 @@ async fn shows_the_shelf_of_reports() {
     agent
         .store
         .file(
-            "daily",
-            "2026-08-16",
-            "Сутки 2026-08-16",
-            "reports/daily/2026-08-16.md",
-            "# Сутки\n\n## Инциденты\n\nНи одного за сутки.",
+            sre_store::Filing {
+                kind: "daily",
+                name: "2026-08-16",
+                title: "Сутки 2026-08-16",
+                path: "reports/daily/2026-08-16.md",
+                body: "# Сутки\n\n## Инциденты\n\nНи одного за сутки.",
+                whole: true,
+            },
             sre_domain::Minute::at(1_786_968_660),
         )
         .await
@@ -952,11 +955,14 @@ async fn opens_a_report() {
     agent
         .store
         .file(
-            "daily",
-            "2026-08-16",
-            "Сутки 2026-08-16",
-            "reports/daily/2026-08-16.md",
-            "Ни одного за сутки",
+            sre_store::Filing {
+                kind: "daily",
+                name: "2026-08-16",
+                title: "Сутки 2026-08-16",
+                path: "reports/daily/2026-08-16.md",
+                body: "Ни одного за сутки",
+                whole: true,
+            },
             sre_domain::Minute::at(1_786_968_660),
         )
         .await
