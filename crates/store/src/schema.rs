@@ -208,4 +208,27 @@ pub const STEPS: &[&str] = &[
     CREATE UNIQUE INDEX IF NOT EXISTS drafts_once ON drafts (name);
     CREATE INDEX IF NOT EXISTS drafts_state ON drafts (state, written);
     ",
+    // 11. Приглушения: пара «сервис плюс сигнатура», замолкшая на срок.
+    //
+    // Срок обязателен и в схеме, и в правилах: вечное приглушение — это
+    // слепота, оформленная как настройка
+    // ([ADR-0019](../../../docs/adr/0019-muting-instead-of-per-service-thresholds.md)).
+    //
+    // Отклонение помечается номером приглушения, а не отсевом: отсев — решение
+    // модели, приглушение — решение человека, и путать их в отчёте нельзя.
+    "
+    CREATE TABLE IF NOT EXISTS mutes (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        service   TEXT    NOT NULL,
+        signature TEXT    NOT NULL,
+        until     INTEGER NOT NULL,
+        made      INTEGER NOT NULL,
+        author    TEXT    NOT NULL,
+        reason    TEXT    NOT NULL,
+        lifted    INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS mutes_pair ON mutes (service, signature, until);
+
+    ALTER TABLE deviations ADD COLUMN muted INTEGER;
+    ",
 ];

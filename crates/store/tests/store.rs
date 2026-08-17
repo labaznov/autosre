@@ -1091,3 +1091,143 @@ async fn holds_the_asked_number_of_notes() {
     let base = learned().await;
     assert_eq!(base.store.recall("диск таймаут", 1).await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn keeps_a_muted_deviation_out_of_the_loose_pile() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    let mute = base
+        .store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", "ругается каждую ночь"),
+            at,
+        )
+        .await
+        .unwrap();
+    base.store.hush_deviation(id, mute).await.unwrap();
+    assert!(base.store.loose(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn counts_what_kept_happening_while_muted() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let mute = base
+        .store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", "ругается каждую ночь"),
+            at,
+        )
+        .await
+        .unwrap();
+    for step in 0..3 {
+        let (id, _) = spotted(&base, &wifi(), at.back(-step), 91.0).await;
+        base.store.hush_deviation(id, mute).await.unwrap();
+    }
+    assert_eq!(base.store.mutes(at, 10).await.unwrap()[0].seen, 3);
+}
+
+#[tokio::test]
+async fn finds_a_live_mute_for_a_pair() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", ""),
+            at,
+        )
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .muted(&Service::new("orders-api"), &Signature::of("timed out"), at)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn lets_an_expired_mute_go() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-60),
+            ("букин", ""),
+            at,
+        )
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .muted(
+                &Service::new("orders-api"),
+                &Signature::of("timed out"),
+                at.back(-120)
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn keeps_a_mute_of_one_pair_off_another() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", ""),
+            at,
+        )
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .muted(&Service::new("billing-api"), &Signature::of("timed out"), at)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn stops_a_lifted_mute_from_silencing() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let mute = base
+        .store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-7 * 24 * 60),
+            ("букин", ""),
+            at,
+        )
+        .await
+        .unwrap();
+    base.store.unmute(mute, at).await.unwrap();
+    assert!(
+        base.store
+            .muted(&Service::new("orders-api"), &Signature::of("timed out"), at)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}

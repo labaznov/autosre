@@ -136,7 +136,8 @@ impl Stand {
             &sre_app::digger::Recipe {
                 digging: &Digging::default().patient(patience),
                 incidents: &Incidents::default(),
-                knowledge: &sre_app::config::Knowledge::default(),
+                knowledge: &sre_app::config::Knowledge::default()
+                    .drafting(directory.path().join("drafts")),
             },
         );
         Self {

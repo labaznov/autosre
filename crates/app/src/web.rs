@@ -20,7 +20,7 @@ use sre_store::Store;
 use crate::config::Knowledge;
 use crate::metrics::Metrics;
 use crate::session::{COOKIE, Doorman};
-use crate::view::{Card, Paper, Question};
+use crate::view::{Card, Paper, Question, Silence};
 
 /// Стили: вшиты в бинарь, чтобы образ оставался одним файлом.
 const STYLE: &str = include_str!("../static/style.css");
@@ -68,6 +68,9 @@ pub fn routes(shared: Shared) -> Router {
         .route("/inquiry/{id}/answer", post(answer))
         .route("/waiting", get(waiting))
         .route("/draft/{id}/settle", post(settle))
+        .route("/mutes", get(mutes))
+        .route("/incident/{id}/mute", post(mute))
+        .route("/mute/{id}/lift", post(lift))
         .route("/api/metrics", get(quality))
         .route("/login", get(door).post(enter))
         .route("/logout", post(leave))
@@ -228,6 +231,103 @@ async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
 /// Сколько всего ждёт руки дежурного: заявки плюс непринятые черновики.
 async fn waits(shared: &Shared) -> usize {
     pending(shared).await.len() + shared.store.unsettled(100).await.unwrap_or_default().len()
+}
+
+#[derive(Template)]
+#[template(path = "mutes.html")]
+struct Quiet {
+    mutes: Vec<Silence>,
+    who: String,
+    waiting: usize,
+}
+
+/// Приглушения: действующие сверху.
+async fn mutes(State(shared): State<Shared>, headers: HeaderMap) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let now = Minute::of(Utc::now());
+    let found = shared.store.mutes(now, 200).await.unwrap_or_default();
+    render(&Quiet {
+        mutes: found.iter().map(Silence::of).collect(),
+        who,
+        waiting: waits(&shared).await,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct Muting {
+    days: i64,
+    reason: String,
+}
+
+/// Наибольший срок приглушения.
+///
+/// Вечное приглушение — это слепота, оформленная как настройка
+/// ([ADR-0019](../../../docs/adr/0019-muting-instead-of-per-service-thresholds.md)),
+/// поэтому предел стоит в коде, а не в форме: форму подделать легче.
+const LONGEST: i64 = 90;
+
+/// Приглушает пару «сервис плюс сигнатура» инцидента.
+async fn mute(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(given): Form<Muting>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let days = given.days.clamp(1, LONGEST);
+    let Ok(incidents) = shared.store.incidents(false, 500).await else {
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "инциденты не прочитаны");
+    };
+    let Some(incident) = incidents.into_iter().find(|it| it.id == id) else {
+        return failure(StatusCode::NOT_FOUND, "инцидент не найден");
+    };
+    let now = Minute::of(Utc::now());
+    match shared
+        .store
+        .mute(
+            &incident.service,
+            &incident.signature,
+            now.back(-days * 24 * 60),
+            (&who, given.reason.trim()),
+            now,
+        )
+        .await
+    {
+        Ok(mute) => {
+            tracing::info!(
+                mute,
+                incident = id,
+                service = incident.service.as_str(),
+                days,
+                who,
+                "пара приглушена"
+            );
+            Redirect::to(&format!("/incident/{id}")).into_response()
+        }
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+/// Снимает приглушение до срока.
+async fn lift(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i64>) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    match shared.store.unmute(id, Minute::of(Utc::now())).await {
+        Ok(true) => {
+            tracing::info!(mute = id, who, "приглушение снято");
+            Redirect::to("/mutes").into_response()
+        }
+        Ok(false) => failure(
+            StatusCode::NOT_FOUND,
+            "приглушение не найдено или уже снято",
+        ),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
 }
 
 #[derive(Debug, Deserialize)]

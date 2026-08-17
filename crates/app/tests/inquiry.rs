@@ -137,7 +137,8 @@ impl Stand {
                     .patient(Duration::from_hours(1))
                     .quick(Duration::from_millis(200)),
                 incidents: &Incidents::default(),
-                knowledge: &sre_app::config::Knowledge::default(),
+                knowledge: &sre_app::config::Knowledge::default()
+                    .drafting(directory.path().join("drafts")),
             },
         ));
         Self {

@@ -86,6 +86,21 @@ pub struct Written {
     pub who: Option<String>,
 }
 
+/// Приглушение в том виде, в каком его читают.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Muted {
+    pub id: i64,
+    pub service: String,
+    pub signature: String,
+    pub until: Minute,
+    pub author: String,
+    pub reason: String,
+    /// Действует ли ещё: срок не вышел и никто не снял.
+    pub live: bool,
+    /// Сколько отклонений накопилось тихо.
+    pub seen: u64,
+}
+
 /// Найденная заметка.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recalled {
@@ -422,7 +437,8 @@ impl Store {
         self.work(move |db| {
             let mut query = db.prepare(
                 "SELECT id, source, stream, horizon, at, value, baseline, score, weight
-                   FROM deviations WHERE incident IS NULL AND sifted IS NULL
+                   FROM deviations
+                  WHERE incident IS NULL AND sifted IS NULL AND muted IS NULL
                   ORDER BY weight DESC, id ASC LIMIT ?1",
             )?;
             let rows = query.query_map(params![limit], |row| {
@@ -804,6 +820,124 @@ impl Store {
                   ORDER BY id",
             )?;
             let rows = query.query_map(params![incident], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Приглушает пару «сервис плюс сигнатура» до указанного срока.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn mute(
+        &self,
+        service: &Service,
+        signature: &Signature,
+        until: Minute,
+        who: (&str, &str),
+        made: Minute,
+    ) -> Result<i64, StoreError> {
+        let service = service.as_str().to_owned();
+        let signature = signature.as_str().to_owned();
+        let (author, reason) = (who.0.to_owned(), who.1.to_owned());
+        self.work(move |db| {
+            db.execute(
+                "INSERT INTO mutes (service, signature, until, made, author, reason)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    service,
+                    signature,
+                    until.stamp(),
+                    made.stamp(),
+                    author,
+                    reason
+                ],
+            )?;
+            Ok(db.last_insert_rowid())
+        })
+        .await
+    }
+
+    /// Действующее приглушение пары, если оно есть.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn muted(
+        &self,
+        service: &Service,
+        signature: &Signature,
+        now: Minute,
+    ) -> Result<Option<i64>, StoreError> {
+        let service = service.as_str().to_owned();
+        let signature = signature.as_str().to_owned();
+        self.work(move |db| {
+            Ok(db
+                .query_row(
+                    "SELECT id FROM mutes
+                      WHERE service = ?1 AND signature = ?2 AND until > ?3 AND lifted IS NULL
+                      ORDER BY until DESC LIMIT 1",
+                    params![service, signature, now.stamp()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?)
+        })
+        .await
+    }
+
+    /// Помечает отклонение приглушённым: оно копится, но никого не будит.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn hush_deviation(&self, deviation: i64, mute: i64) -> Result<bool, StoreError> {
+        self.work(move |db| {
+            Ok(db.execute(
+                "UPDATE deviations SET muted = ?2 WHERE id = ?1",
+                params![deviation, mute],
+            )? > 0)
+        })
+        .await
+    }
+
+    /// Снимает приглушение до срока.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn unmute(&self, mute: i64, at: Minute) -> Result<bool, StoreError> {
+        self.work(move |db| {
+            Ok(db.execute(
+                "UPDATE mutes SET lifted = ?2 WHERE id = ?1 AND lifted IS NULL",
+                params![mute, at.stamp()],
+            )? > 0)
+        })
+        .await
+    }
+
+    /// Приглушения: действующие первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn mutes(&self, now: Minute, limit: usize) -> Result<Vec<Muted>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT m.id, m.service, m.signature, m.until, m.author, m.reason, m.lifted,
+                        (SELECT COUNT(*) FROM deviations d WHERE d.muted = m.id)
+                   FROM mutes m
+                  ORDER BY (m.until > ?1 AND m.lifted IS NULL) DESC, m.until DESC LIMIT ?2",
+            )?;
+            let rows = query.query_map(params![now.stamp(), limit], |row| {
+                let until = Minute::at(row.get(3)?);
+                let lifted: Option<i64> = row.get(6)?;
+                Ok(Muted {
+                    id: row.get(0)?,
+                    service: row.get(1)?,
+                    signature: row.get(2)?,
+                    until,
+                    author: row.get(4)?,
+                    reason: row.get(5)?,
+                    live: lifted.is_none() && until.stamp() > now.stamp(),
+                    seen: row.get(7)?,
+                })
+            })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
         .await

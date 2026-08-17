@@ -163,3 +163,13 @@ nav form { display: inline; }
 .draft h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin: 0 0 6px; }
 .draft .title { margin: 0 0 4px; }
 .draft form { display: inline; margin-right: 8px; }
+
+.muting { margin: 16px 0 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.muting input[name="reason"] {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  min-width: 220px;
+}

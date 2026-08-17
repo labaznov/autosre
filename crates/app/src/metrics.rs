@@ -22,6 +22,7 @@ pub struct Metrics {
     concluded: AtomicU64,
     skipped: AtomicU64,
     notes: AtomicU64,
+    hushed: AtomicU64,
     drafts: AtomicU64,
     inquiries: AtomicU64,
     answered: AtomicU64,
@@ -41,6 +42,7 @@ impl Metrics {
             concluded: AtomicU64::new(0),
             skipped: AtomicU64::new(0),
             notes: AtomicU64::new(0),
+            hushed: AtomicU64::new(0),
             drafts: AtomicU64::new(0),
             inquiries: AtomicU64::new(0),
             answered: AtomicU64::new(0),
@@ -82,6 +84,11 @@ impl Metrics {
     pub fn notes(&self, count: usize) {
         self.notes
             .store(count.try_into().unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// Отмечает отклонение, приглушённое человеком.
+    pub fn hushed(&self) {
+        self.hushed.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Отмечает написанный черновик заметки.
@@ -168,6 +175,12 @@ impl Metrics {
             "sre_notes",
             "Заметки базы знаний в поисковом индексе",
             &self.notes.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            &mut out,
+            "sre_hushed_total",
+            "Отклонения, приглушённые человеком",
+            &self.hushed.load(Ordering::Relaxed).to_string(),
         );
         counter(
             &mut out,

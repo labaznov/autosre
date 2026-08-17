@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Приглушения — Агент диагностики{% endblock %}
+
+{% block nav %}
+<nav>
+  {% include "badge.html" %}
+  <a href="/">к ленте</a>
+  <span class="who">{{ who }}</span>
+  <form method="post" action="/logout"><button class="plain">выйти</button></form>
+</nav>
+{% endblock %}
+
+{% block content %}
+<h1 class="page">Приглушения</h1>
+
+{% if mutes.is_empty() %}
+  <p class="empty">Приглушений нет: агент говорит обо всём, что находит</p>
+{% endif %}
+
+{% for mute in mutes %}
+  <article class="incident {% if mute.live %}live{% endif %}">
+    <header>
+      <span class="state">{% if mute.live %}молчит{% else %}истекло{% endif %}</span>
+      <span class="service">{{ mute.service }}</span>
+      <span class="stamp">до {{ mute.until }}</span>
+    </header>
+    <p class="signature">{{ mute.signature }}</p>
+    <p class="numbers">
+      приглушил {{ mute.author }}{% if !mute.reason.is_empty() %} · {{ mute.reason }}{% endif %}
+      {% if mute.seen > 0 %} · приглушено, но продолжается: {{ mute.seen }}{% endif %}
+    </p>
+    {% if mute.live %}
+      <form method="post" action="/mute/{{ mute.id }}/lift"><button>снять</button></form>
+    {% endif %}
+  </article>
+{% endfor %}
+{% endblock %}

@@ -94,6 +94,13 @@
     <dt>Поток</dt><dd><code>{{ incident.stream }}</code></dd>
   </dl>
 
+  <form class="muting" method="post" action="/incident/{{ incident.id }}/mute">
+    <input type="hidden" name="days" value="7">
+    <input name="reason" placeholder="почему приглушаем">
+    <button>молчать неделю</button>
+    <span class="hint">срок обязателен: вечного приглушения не бывает</span>
+  </form>
+
   <footer class="verdict">
     {% if let Some(useful) = incident.verdict %}
       {% if useful %}<span class="judged">по делу</span>

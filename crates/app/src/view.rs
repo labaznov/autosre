@@ -6,7 +6,7 @@
 
 use chrono::{TimeZone, Utc};
 use sre_domain::{Incident, Minute, State};
-use sre_store::{Asked, Finding, Written};
+use sre_store::{Asked, Finding, Muted, Written};
 
 /// Инцидент в том виде, в каком его читает человек.
 pub struct Card {
@@ -113,6 +113,34 @@ impl Question {
                 "dropped" => "снята дежурным",
                 _ => "погасла без ответа",
             },
+        }
+    }
+}
+
+/// Приглушение в том виде, в каком его читает дежурный.
+pub struct Silence {
+    pub id: i64,
+    pub service: String,
+    pub signature: String,
+    pub until: String,
+    pub author: String,
+    pub reason: String,
+    pub live: bool,
+    pub seen: u64,
+}
+
+impl Silence {
+    #[must_use]
+    pub fn of(muted: &Muted) -> Self {
+        Self {
+            id: muted.id,
+            service: muted.service.clone(),
+            signature: muted.signature.clone(),
+            until: moment(muted.until),
+            author: muted.author.clone(),
+            reason: muted.reason.clone(),
+            live: muted.live,
+            seen: muted.seen,
         }
     }
 }

@@ -78,6 +78,26 @@ async fn sort(
         let signature = pick(&groups, &deviation);
         let service = Service::of(&deviation.stream, &settings.service_labels);
 
+        // Приглушение проверяется до отсева: платить модели за то, что человек
+        // уже велел не показывать, незачем
+        // ([ADR-0019](../../../docs/adr/0019-muting-instead-of-per-service-thresholds.md)).
+        if let Ok(Some(mute)) = store
+            .muted(&service, &signature, Minute::of(Utc::now()))
+            .await
+        {
+            if let Err(failure) = store.hush_deviation(id, mute).await {
+                tracing::error!(%failure, "приглушённое отклонение не помечено");
+            }
+            metrics.hushed();
+            tracing::debug!(
+                service = service.as_str(),
+                signature = signature.as_str(),
+                mute,
+                "отклонение приглушено человеком и копится тихо"
+            );
+            continue;
+        }
+
         // Отсев: стоит ли этим заниматься. Модель молчит — заводим инцидент
         // всё равно: находка обязана дойти до дежурного даже без объяснения.
         let because = match model

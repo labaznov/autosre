@@ -109,6 +109,17 @@ impl Agent {
             .expect("запрос не дошёл");
     }
 
+    /// Приглушает пару инцидента на заданное число суток.
+    async fn mute(&self, id: i64, days: &str, cookie: &str) {
+        Self::client()
+            .post(self.at(&format!("/incident/{id}/mute")))
+            .header("cookie", cookie)
+            .form(&[("days", days), ("reason", "ругается каждую ночь")])
+            .send()
+            .await
+            .expect("запрос не дошёл");
+    }
+
     /// Принимает или отклоняет черновик.
     async fn settle(&self, id: i64, accept: &str, cookie: &str) {
         Self::client()
@@ -713,4 +724,88 @@ async fn settles_a_draft_once() {
         .expect("вход не удался");
     agent.settle(draft, "yes", &cookie).await;
     assert!(agent.store.unsettled(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn hushes_a_pair_the_duty_engineer_is_tired_of() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.mute(id, "7", &cookie).await;
+    let now = sre_domain::Minute::at(1_786_968_720);
+    assert_eq!(agent.store.mutes(now, 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn refuses_to_mute_forever() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.mute(id, "100000", &cookie).await;
+    let now = sre_domain::Minute::at(1_786_968_720);
+    let until = agent.store.mutes(now, 10).await.unwrap()[0].until;
+    assert!(until.stamp() - now.stamp() <= 91 * 24 * 60 * 60);
+}
+
+#[tokio::test]
+async fn shows_the_muted_pairs_on_their_own_page() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.mute(id, "7", &cookie).await;
+    let page = agent.inside("/mutes", &cookie).await.text().await.unwrap();
+    assert!(page.contains("orders-api"));
+}
+
+#[tokio::test]
+async fn says_there_is_nothing_muted() {
+    let agent = Agent::start().await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent.inside("/mutes", &cookie).await.text().await.unwrap();
+    assert!(page.contains("Приглушений нет"));
+}
+
+#[tokio::test]
+async fn lifts_a_mute_before_its_time() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.mute(id, "7", &cookie).await;
+    let now = sre_domain::Minute::at(1_786_968_720);
+    let mute = agent.store.mutes(now, 10).await.unwrap()[0].id;
+    Agent::client()
+        .post(agent.at(&format!("/mute/{mute}/lift")))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert!(!agent.store.mutes(now, 10).await.unwrap()[0].live);
+}
+
+#[tokio::test]
+async fn keeps_muting_from_a_stranger() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let answer = Agent::client()
+        .post(agent.at(&format!("/incident/{id}/mute")))
+        .form(&[("days", "7"), ("reason", "чужой")])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert_eq!(answer.status(), 303);
 }
