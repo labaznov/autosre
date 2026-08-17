@@ -4,6 +4,7 @@
 
 {% block nav %}
 <nav>
+  {% include "badge.html" %}
   <a href="/">к ленте</a>
   <span class="who">{{ who }}</span>
   <form method="post" action="/logout"><button class="plain">выйти</button></form>

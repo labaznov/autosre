@@ -40,10 +40,14 @@ pub struct Card {
 /// Заявка в том виде, в каком её читает дежурный.
 pub struct Question {
     pub id: i64,
+    pub incident: i64,
+    pub service: String,
     pub host: String,
     pub command: String,
     pub reason: String,
     pub asked: String,
+    /// Сколько заявка уже ждёт: в списке это главное число.
+    pub waited: String,
     pub open: bool,
     pub who: Option<String>,
     pub answer: Option<String>,
@@ -55,6 +59,9 @@ impl Question {
     pub fn of(asked: &Asked) -> Self {
         Self {
             id: asked.id,
+            incident: asked.incident,
+            service: asked.service.clone(),
+            waited: lasting(asked.asked, Minute::of(Utc::now())),
             host: asked.host.clone(),
             command: asked.command.clone(),
             reason: asked.reason.clone(),

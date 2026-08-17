@@ -47,6 +47,8 @@ pub struct Finding {
 pub struct Asked {
     pub id: i64,
     pub incident: i64,
+    /// Сервис инцидента: заявка без него — команда неизвестно про что.
+    pub service: String,
     pub host: String,
     pub command: String,
     pub reason: String,
@@ -720,8 +722,10 @@ impl Store {
     pub async fn inquiries(&self, incident: i64) -> Result<Vec<Asked>, StoreError> {
         self.work(move |db| {
             let mut query = db.prepare(
-                "SELECT id, incident, host, command, reason, state, asked, who, answer
-                   FROM inquiries WHERE incident = ?1 ORDER BY id DESC",
+                "SELECT i.id, i.incident, n.service, i.host, i.command, i.reason,
+                        i.state, i.asked, i.who, i.answer
+                   FROM inquiries i JOIN incidents n ON n.id = i.incident
+                  WHERE i.incident = ?1 ORDER BY i.id DESC",
             )?;
             let rows = query.query_map(params![incident], read_inquiry)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -736,8 +740,10 @@ impl Store {
     pub async fn pending(&self, limit: usize) -> Result<Vec<Asked>, StoreError> {
         self.work(move |db| {
             let mut query = db.prepare(
-                "SELECT id, incident, host, command, reason, state, asked, who, answer
-                   FROM inquiries WHERE state = 'open' ORDER BY asked ASC, id ASC LIMIT ?1",
+                "SELECT i.id, i.incident, n.service, i.host, i.command, i.reason,
+                        i.state, i.asked, i.who, i.answer
+                   FROM inquiries i JOIN incidents n ON n.id = i.incident
+                  WHERE i.state = 'open' ORDER BY i.asked ASC, i.id ASC LIMIT ?1",
             )?;
             let rows = query.query_map(params![limit], read_inquiry)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -1201,13 +1207,14 @@ fn read_inquiry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Asked> {
     Ok(Asked {
         id: row.get(0)?,
         incident: row.get(1)?,
-        host: row.get(2)?,
-        command: row.get(3)?,
-        reason: row.get(4)?,
-        state: row.get(5)?,
-        asked: Minute::at(row.get(6)?),
-        who: row.get(7)?,
-        answer: row.get(8)?,
+        service: row.get(2)?,
+        host: row.get(3)?,
+        command: row.get(4)?,
+        reason: row.get(5)?,
+        state: row.get(6)?,
+        asked: Minute::at(row.get(7)?),
+        who: row.get(8)?,
+        answer: row.get(9)?,
     })
 }
 

@@ -422,3 +422,142 @@ async fn breaks_a_long_number_into_groups() {
         .unwrap();
     assert!(page.contains("91"));
 }
+
+/// Заводит инцидент с открытой заявкой и отвечает её номером.
+async fn asked(agent: &Agent) -> (i64, i64) {
+    use sre_domain::{Inquiry, Minute};
+    let incident = incident(agent).await;
+    let at = Minute::at(1_786_968_660);
+    let dig = agent.store.dig(incident, "error-burst", at).await.unwrap();
+    let inquiry = agent
+        .store
+        .ask(
+            incident,
+            dig,
+            &Inquiry::new("node-01", "df -h /var", "место на диске").unwrap(),
+            at,
+        )
+        .await
+        .unwrap();
+    (incident, inquiry)
+}
+
+#[tokio::test]
+async fn shows_the_command_on_the_card() {
+    let agent = Agent::start().await;
+    let (incident, _) = asked(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside(&format!("/incident/{incident}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("df -h /var"));
+}
+
+#[tokio::test]
+async fn collects_what_waits_for_the_duty_engineer() {
+    let agent = Agent::start().await;
+    asked(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside("/waiting", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("df -h /var"));
+}
+
+#[tokio::test]
+async fn says_there_is_nothing_to_wait_for() {
+    let agent = Agent::start().await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside("/waiting", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("Ждать нечего"));
+}
+
+#[tokio::test]
+async fn keeps_the_waiting_list_from_a_stranger() {
+    let agent = Agent::start().await;
+    assert_eq!(agent.get("/waiting").await.status(), 303);
+}
+
+#[tokio::test]
+async fn counts_the_waiting_inquiries_in_the_header() {
+    let agent = Agent::start().await;
+    asked(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent.inside("/", &cookie).await.text().await.unwrap();
+    assert!(page.contains("ждёт вас · 1"));
+}
+
+#[tokio::test]
+async fn takes_the_answer_of_the_duty_engineer() {
+    let agent = Agent::start().await;
+    let (incident, inquiry) = asked(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    Agent::client()
+        .post(agent.at(&format!("/inquiry/{inquiry}/answer")))
+        .header("cookie", &cookie)
+        .form(&[("answer", "/var 98% занято")])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert_eq!(
+        agent.store.answers(incident).await.unwrap()[0].1,
+        "/var 98% занято"
+    );
+}
+
+#[tokio::test]
+async fn drops_an_inquiry_answered_with_nothing() {
+    let agent = Agent::start().await;
+    let (_, inquiry) = asked(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    Agent::client()
+        .post(agent.at(&format!("/inquiry/{inquiry}/answer")))
+        .header("cookie", &cookie)
+        .form(&[("answer", "  ")])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert!(agent.store.pending(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn keeps_an_answer_from_a_stranger() {
+    let agent = Agent::start().await;
+    let (_, inquiry) = asked(&agent).await;
+    let answer = Agent::client()
+        .post(agent.at(&format!("/inquiry/{inquiry}/answer")))
+        .form(&[("answer", "чужой ответ")])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    assert_eq!(answer.status(), 303);
+}

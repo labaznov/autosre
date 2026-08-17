@@ -19,7 +19,7 @@ use sre_store::Store;
 
 use crate::metrics::Metrics;
 use crate::session::{COOKIE, Doorman};
-use crate::view::Card;
+use crate::view::{Card, Question};
 
 /// Стили: вшиты в бинарь, чтобы образ оставался одним файлом.
 const STYLE: &str = include_str!("../static/style.css");
@@ -62,6 +62,7 @@ pub fn routes(shared: Shared) -> Router {
         .route("/incident/{id}", get(card))
         .route("/incident/{id}/verdict", post(verdict))
         .route("/inquiry/{id}/answer", post(answer))
+        .route("/waiting", get(waiting))
         .route("/api/metrics", get(quality))
         .route("/login", get(door).post(enter))
         .route("/logout", post(leave))
@@ -76,6 +77,7 @@ pub fn routes(shared: Shared) -> Router {
 struct Feed {
     incidents: Vec<Card>,
     who: String,
+    waiting: usize,
 }
 
 #[derive(Template)]
@@ -83,6 +85,15 @@ struct Feed {
 struct Single {
     incident: Card,
     who: String,
+    waiting: usize,
+}
+
+#[derive(Template)]
+#[template(path = "waiting.html")]
+struct Duty {
+    inquiries: Vec<Question>,
+    who: String,
+    waiting: usize,
 }
 
 #[derive(Template)]
@@ -117,6 +128,7 @@ async fn feed(State(shared): State<Shared>, headers: HeaderMap) -> Response {
             render(&Feed {
                 incidents: cards,
                 who,
+                waiting: pending(&shared).await.len(),
             })
         }
         Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
@@ -137,6 +149,7 @@ async fn card(State(shared): State<Shared>, headers: HeaderMap, Path(id): Path<i
                 render(&Single {
                     incident: Card::of(incident, related, finding.as_ref()).asking(&asked),
                     who,
+                    waiting: pending(&shared).await.len(),
                 })
             }
             None => failure(StatusCode::NOT_FOUND, "инцидент не найден"),
@@ -173,6 +186,26 @@ async fn verdict(
         Ok(false) => failure(StatusCode::NOT_FOUND, "инцидент не найден"),
         Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
     }
+}
+
+/// Всё, что ждёт руки дежурного.
+///
+/// Одно место на все заявки: искать их по карточкам — значит не находить.
+async fn waiting(State(shared): State<Shared>, headers: HeaderMap) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let asked = pending(&shared).await;
+    render(&Duty {
+        inquiries: asked.iter().map(Question::of).collect(),
+        who,
+        waiting: asked.len(),
+    })
+}
+
+/// Открытые заявки, самые старые первыми.
+async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
+    shared.store.pending(100).await.unwrap_or_default()
 }
 
 #[derive(Debug, Deserialize)]

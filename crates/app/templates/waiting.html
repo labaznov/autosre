@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Ждёт вас — Агент диагностики{% endblock %}
+
+{% block nav %}
+<nav>
+  {% include "badge.html" %}
+  <a href="/">к ленте</a>
+  <span class="who">{{ who }}</span>
+  <form method="post" action="/logout"><button class="plain">выйти</button></form>
+</nav>
+{% endblock %}
+
+{% block content %}
+<h1 class="page">Ждёт вас</h1>
+
+{% if inquiries.is_empty() %}
+  <p class="empty">Ждать нечего: агент ни о чём не спрашивает</p>
+{% endif %}
+
+{% for inquiry in inquiries %}
+  <article class="incident live">
+    <header>
+      <span class="state">заявка</span>
+      <a class="service" href="/incident/{{ inquiry.incident }}">{{ inquiry.service }}</a>
+      <span class="stamp">{{ inquiry.asked }} · ждёт {{ inquiry.waited }}</span>
+    </header>
+    <p class="signature">{{ inquiry.reason }}</p>
+    <pre class="command">{{ inquiry.command }}</pre>
+    <p class="numbers">на {{ inquiry.host }} · инцидент
+      <a href="/incident/{{ inquiry.incident }}">#{{ inquiry.incident }}</a></p>
+  </article>
+{% endfor %}
+{% endblock %}
