@@ -74,6 +74,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "cause": f"{service}: похоже на нехватку места, но метрики диска нет",
                 "confidence": 0.3,
                 "advice": "посмотреть, сколько осталось на разделе с данными",
+                "severity": "medium",
                 "need": "ask",
                 "host": service,
                 "command": "df -h /var",
@@ -88,6 +89,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "cause": f"{service}: судя по сигнатурам, отвечает не он, а то, от чего он зависит",
             "confidence": 0.8 if answered else 0.7 if wider else 0.4,
             "advice": "проверить соседей по цепочке и последние выкаты",
+            "severity": "high" if answered else "medium",
             "need": "nothing" if (wider or answered) else "logs",
         }
         if found:

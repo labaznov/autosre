@@ -61,6 +61,9 @@ pub struct Conclusion {
     pub confidence: f64,
     /// Куда смотреть дежурному.
     pub advice: String,
+    /// Насколько всё плохо: `low`, `medium` или `high`.
+    #[serde(default)]
+    pub severity: Option<String>,
     /// Чего не хватило: `logs`, `metrics`, `neighbours`, `ask` или `nothing`.
     #[serde(default)]
     pub need: Option<String>,

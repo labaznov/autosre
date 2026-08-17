@@ -428,14 +428,18 @@ async fn finish(
 ) {
     let now = Minute::of(Utc::now());
     let note = leaned(digger, conclusion).await;
+    let severity = sre_domain::Severity::of(conclusion.severity.as_deref().unwrap_or_default());
     match digger
         .store
         .conclude(
-            investigation,
-            &conclusion.cause,
-            conclusion.confidence,
-            &conclusion.advice,
-            note.as_deref(),
+            &sre_store::Reached {
+                investigation,
+                cause: &conclusion.cause,
+                confidence: conclusion.confidence,
+                advice: &conclusion.advice,
+                note: note.as_deref(),
+                severity,
+            },
             now,
         )
         .await
@@ -450,6 +454,7 @@ async fn finish(
                 incident = incident.id,
                 service = incident.service.as_str(),
                 confidence = conclusion.confidence,
+                severity = severity.as_str(),
                 "вывод готов"
             );
         }

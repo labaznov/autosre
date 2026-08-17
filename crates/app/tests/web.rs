@@ -418,10 +418,9 @@ async fn keeps_the_verdict_from_a_stranger() {
     assert_eq!(answer.status(), 303);
 }
 
-#[tokio::test]
-async fn shows_the_conclusion_on_the_card() {
-    let agent = Agent::start().await;
-    let id = incident(&agent).await;
+/// Инцидент с готовым выводом и проставленной важностью.
+async fn concluded(agent: &Agent) -> i64 {
+    let id = incident(agent).await;
     let dig = agent
         .store
         .dig(id, "error-burst", sre_domain::Minute::at(1_786_968_660))
@@ -430,15 +429,25 @@ async fn shows_the_conclusion_on_the_card() {
     agent
         .store
         .conclude(
-            dig,
-            "апстрим перестал отвечать после выката",
-            0.7,
-            "проверить откат апстрима",
-            None,
+            &sre_store::Reached {
+                investigation: dig,
+                cause: "апстрим перестал отвечать после выката",
+                confidence: 0.7,
+                advice: "проверить откат апстрима",
+                note: None,
+                severity: sre_domain::Severity::High,
+            },
             sre_domain::Minute::at(1_786_968_720),
         )
         .await
         .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn shows_the_conclusion_on_the_card() {
+    let agent = Agent::start().await;
+    let id = concluded(&agent).await;
     let cookie = agent.enter("duty", SECRET).await.unwrap();
     let page = agent
         .inside(&format!("/incident/{id}"), &cookie)
@@ -1081,4 +1090,38 @@ async fn drops_a_measurement_of_a_clock_that_went_backwards() {
     agent.shared.metrics().detected(-60);
     let page = agent.get("/metrics").await.text().await.unwrap();
     assert!(page.contains("sre_detection_seconds_count 0"));
+}
+
+#[tokio::test]
+async fn shows_how_bad_it_is_on_the_card() {
+    let agent = Agent::start().await;
+    let id = concluded(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside(&format!("/incident/{id}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("работа не делается"));
+}
+
+#[tokio::test]
+async fn says_nothing_about_severity_before_a_conclusion() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent
+        .inside(&format!("/incident/{id}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(!page.contains("работа не делается"));
 }

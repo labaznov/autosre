@@ -14,7 +14,7 @@ pub mod signature;
 pub use bucket::{Bucket, Kind, Stream};
 pub use detector::{Detector, Thresholds, Verdict};
 pub use deviation::Deviation;
-pub use incident::{Incident, Service, State, Tally};
+pub use incident::{Incident, Service, Severity, State, Tally};
 pub use inquiry::{Inquiry, Meddles};
 pub use minute::{Hour, Minute, Span, SpanError};
 pub use signature::{Group, Signature};

@@ -23,6 +23,9 @@
     <header>
       <span class="state">{{ incident.state }}</span>
       <a class="service" href="/incident/{{ incident.id }}">{{ incident.service }}</a>
+      {% if let Some(severity) = incident.severity %}
+        <span class="severity {% if incident.loud %}loud{% endif %}">{{ severity }}</span>
+      {% endif %}
       <span class="stamp">{{ incident.began }} · {{ incident.alive }}</span>
     </header>
     <p class="signature">{{ incident.signature }}</p>

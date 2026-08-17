@@ -25,6 +25,9 @@ pub struct Card {
     pub weight: String,
     pub verdict: Option<bool>,
     pub because: Option<String>,
+    /// Насколько всё плохо — по мнению модели. Пусто, пока не было вывода.
+    pub severity: Option<&'static str>,
+    pub loud: bool,
     pub related: Vec<i64>,
     /// Вывод расследования, если он уже есть.
     pub cause: Option<String>,
@@ -179,6 +182,12 @@ impl Card {
             weight: number(incident.weight),
             verdict: incident.verdict,
             because: incident.because,
+            severity: incident.severity.map(|it| match it {
+                sre_domain::Severity::Low => "хуже обычного",
+                sre_domain::Severity::Medium => "теряем часть работы",
+                sre_domain::Severity::High => "работа не делается",
+            }),
+            loud: incident.severity == Some(sre_domain::Severity::High),
             related,
             cause: finding.and_then(|it| it.cause.clone()),
             advice: finding.and_then(|it| it.advice.clone()),

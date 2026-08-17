@@ -16,6 +16,9 @@
   <header>
     <span class="state">{{ incident.state }}</span>
     <h1>{{ incident.service }}</h1>
+    {% if let Some(severity) = incident.severity %}
+      <span class="severity {% if incident.loud %}loud{% endif %}">{{ severity }}</span>
+    {% endif %}
     <span class="stamp">#{{ incident.id }}</span>
   </header>
 

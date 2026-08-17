@@ -66,7 +66,7 @@ async fn answer(State(talk): State<Talk>, body: String) -> String {
     talk.asked.fetch_add(1, Ordering::Relaxed);
     *talk.seen.lock().expect("замок цел") = body;
     format!(
-        r#"{{"choices":[{{"message":{{"content":"{{\"cause\":\"кончилось место\",\"confidence\":0.8,\"advice\":\"чистить диск\",\"need\":\"nothing\",\"note\":\"{}\"}}"}}}}]}}"#,
+        r#"{{"choices":[{{"message":{{"content":"{{\"cause\":\"кончилось место\",\"confidence\":0.8,\"advice\":\"чистить диск\",\"need\":\"nothing\",\"severity\":\"high\",\"note\":\"{}\"}}"}}}}]}}"#,
         talk.note
     )
 }
@@ -247,4 +247,15 @@ async fn spares_a_draft_when_the_answer_was_already_in_the_base() {
     let incident = stand.incident().await;
     stand.done(incident).await;
     assert!(stand.store.unsettled(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn keeps_how_bad_it_is_by_the_word_of_the_model() {
+    let stand = Stand::start("vl-no-space-left").await;
+    let incident = stand.incident().await;
+    stand.done(incident).await;
+    assert_eq!(
+        stand.store.one(incident).await.unwrap().unwrap().severity,
+        Some(sre_domain::Severity::High)
+    );
 }

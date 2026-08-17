@@ -98,6 +98,46 @@ impl State {
     }
 }
 
+/// Важность: насколько всё плохо.
+///
+/// Ставит её модель в выводе — в отличие от веса, который считает агент
+/// ([SPEC §3](../../../docs/SPEC.md)). Вес — про очередь, про то, кого
+/// разбирать первым; важность — про человека, про то, насколько всё плохо.
+/// Их легко перепутать, поэтому они разные типы и разные слова.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub enum Severity {
+    /// Работает, но хуже обычного.
+    Low,
+    /// Часть работы теряется или замедлена заметно для людей.
+    Medium,
+    /// Отказ: работа не делается.
+    High,
+}
+
+impl Severity {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+
+    /// Важность из строки; неизвестное слово — средняя.
+    ///
+    /// Не низкая: модель, ответившая мимо словаря, — не повод считать, что
+    /// всё хорошо.
+    #[must_use]
+    pub fn of(text: &str) -> Self {
+        match text {
+            "low" => Self::Low,
+            "high" => Self::High,
+            _ => Self::Medium,
+        }
+    }
+}
+
 /// Инцидент: сгруппированные отклонения об одной беде.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Incident {
@@ -121,6 +161,8 @@ pub struct Incident {
     pub verdict: Option<bool>,
     /// Почему отсев счёл, что этим стоит заняться. Пусто, если модель молчала.
     pub because: Option<String>,
+    /// Важность: пусто, пока не было вывода.
+    pub severity: Option<Severity>,
 }
 
 /// Счёт инцидентов и оценок — основание метрик приёмки.

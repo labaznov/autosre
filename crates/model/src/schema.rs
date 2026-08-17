@@ -40,11 +40,12 @@ pub fn conclusion() -> Value {
         &json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["cause", "confidence", "advice"],
+            "required": ["cause", "confidence", "advice", "severity"],
             "properties": {
                 "cause": {"type": "string", "maxLength": 600},
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                 "advice": {"type": "string", "maxLength": 400},
+                "severity": {"type": "string", "enum": ["low", "medium", "high"]},
                 "need": {
                     "type": "string",
                     "enum": ["logs", "metrics", "neighbours", "ask", "nothing"]

@@ -40,7 +40,7 @@
 | **Расследование** | `Investigation` | `investigations`, `investigation_steps` | анализ, разбор |
 | **Досье** | `Dossier` | `investigation_steps.data` | контекст, дамп |
 | **Вывод** | `Conclusion` | `investigations`: `cause`, `confidence`, `advice` | вердикт, заключение, разбор |
-| **Важность** | `Severity` | `incidents.severity` | вес, приоритет, критичность |
+| **Важность** | `Severity` | `incidents.severity`: `low`, `medium`, `high` | вес, приоритет, критичность |
 
 ## Инцидент и работа с ним
 

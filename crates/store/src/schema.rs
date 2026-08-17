@@ -275,4 +275,13 @@ pub const STEPS: &[&str] = &[
     "
     ALTER TABLE reports ADD COLUMN whole INTEGER NOT NULL DEFAULT 1;
     ",
+    // 15. Важность инцидента.
+    //
+    // Ставит её модель в выводе, поэтому до первого вывода она пуста — и это
+    // честнее, чем «средняя по умолчанию»: неразобранный инцидент может
+    // оказаться и страшнее, и безобиднее любого разобранного
+    // ([SPEC §3](../../../docs/SPEC.md)).
+    "
+    ALTER TABLE incidents ADD COLUMN severity TEXT;
+    ",
 ];

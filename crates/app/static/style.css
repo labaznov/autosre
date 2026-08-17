@@ -199,3 +199,12 @@ nav form { display: inline; }
 .series th { text-align: left; color: var(--dim); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .series td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .series code { word-break: break-all; }
+
+.severity {
+  font-size: 12px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 2px 10px;
+}
+.severity.loud { color: var(--live); border-color: var(--live); }

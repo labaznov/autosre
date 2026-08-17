@@ -174,6 +174,17 @@ pub async fn single(reporter: &Reporter, incident: i64) -> Option<String> {
 /// Часть «что было»: числа инцидента.
 fn happened(found: &Incident) -> String {
     let mut part = String::from("## Что было\n\n");
+    if let Some(severity) = found.severity {
+        let _ = writeln!(
+            part,
+            "- важность: {}",
+            match severity {
+                sre_domain::Severity::Low => "работает хуже обычного",
+                sre_domain::Severity::Medium => "теряется часть работы",
+                sre_domain::Severity::High => "работа не делается",
+            }
+        );
+    }
     let _ = writeln!(
         part,
         "- начался: {}\n- последнее подтверждение: {}\n- подтверждений: {}\n- пик за окно: {:.0} против обычного\n- источник: {}\n- поток: `{}`",

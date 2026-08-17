@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use sre_domain::{
-    Bucket, Deviation, Hour, Incident, Kind, Minute, Service, Signature, Span, State, Stream, Tally,
+    Bucket, Deviation, Hour, Incident, Kind, Minute, Service, Severity, Signature, Span, State,
+    Stream, Tally,
 };
 use tokio::task;
 
@@ -75,6 +76,20 @@ pub struct Finding {
     pub advice: Option<String>,
     /// Заметка базы знаний, на которую опёрся вывод.
     pub note: Option<String>,
+}
+
+/// Готовый вывод расследования: слишком много строк, чтобы передавать их
+/// по одной.
+#[derive(Debug, Clone, Copy)]
+pub struct Reached<'a> {
+    pub investigation: i64,
+    pub cause: &'a str,
+    pub confidence: f64,
+    pub advice: &'a str,
+    /// Заметка базы знаний, на которую опёрся вывод.
+    pub note: Option<&'a str>,
+    /// Насколько всё плохо — по мнению модели.
+    pub severity: Severity,
 }
 
 /// Заявка в том виде, в каком её читают.
@@ -697,7 +712,7 @@ impl Store {
         self.work(move |db| {
             let mut query = db.prepare(
                 "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because
+                        seen, peak, weight, verdict, because, severity
                    FROM incidents
                   WHERE state = 'open'
                     AND id NOT IN (SELECT incident FROM investigations
@@ -759,25 +774,29 @@ impl Store {
     ///
     /// # Errors
     /// [`StoreError::Sqlite`] на отказе записи.
-    pub async fn conclude(
-        &self,
-        investigation: i64,
-        cause: &str,
-        confidence: f64,
-        advice: &str,
-        note: Option<&str>,
-        at: Minute,
-    ) -> Result<(), StoreError> {
-        let (cause, advice) = (cause.to_owned(), advice.to_owned());
-        let note = note.map(ToOwned::to_owned);
+    pub async fn conclude(&self, found: &Reached<'_>, at: Minute) -> Result<(), StoreError> {
+        let investigation = found.investigation;
+        let (cause, advice) = (found.cause.to_owned(), found.advice.to_owned());
+        let note = found.note.map(ToOwned::to_owned);
+        let (confidence, severity) = (found.confidence, found.severity.as_str().to_owned());
         self.work(move |db| {
-            db.execute(
+            let change = db.unchecked_transaction()?;
+            change.execute(
                 "UPDATE investigations
                     SET state = 'done', finished = ?2, cause = ?3, confidence = ?4,
                         advice = ?5, note = ?6
                   WHERE id = ?1",
                 params![investigation, at.stamp(), cause, confidence, advice, note],
             )?;
+            // Важность живёт на инциденте, а не на расследовании: разборов у
+            // инцидента бывает несколько, а «насколько всё плохо» — одно, и
+            // последнее слово за последним разбором.
+            change.execute(
+                "UPDATE incidents SET severity = ?2
+                  WHERE id = (SELECT incident FROM investigations WHERE id = ?1)",
+                params![investigation, severity],
+            )?;
+            change.commit()?;
             Ok(())
         })
         .await
@@ -1009,21 +1028,21 @@ impl Store {
             };
             let opened = incidents(
                 "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because
+                        seen, peak, weight, verdict, because, severity
                    FROM incidents
                   WHERE state <> 'merged' AND began >= ?1 AND began < ?2
                   ORDER BY weight DESC, id",
             )?;
             let closed = incidents(
                 "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because
+                        seen, peak, weight, verdict, because, severity
                    FROM incidents
                   WHERE state = 'closed' AND closed >= ?1 AND closed < ?2
                   ORDER BY last DESC, id",
             )?;
             let still = incidents(
                 "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because
+                        seen, peak, weight, verdict, because, severity
                    FROM incidents
                   WHERE state = 'open' AND began < ?2 AND ?1 <= ?2
                   ORDER BY weight DESC, id",
@@ -1763,7 +1782,7 @@ impl Store {
         self.work(move |db| {
             let mut query = db.prepare(
                 "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because
+                        seen, peak, weight, verdict, because, severity
                    FROM incidents
                   WHERE state <> 'merged' AND (?1 = 0 OR state = 'open')
                   ORDER BY last DESC, id DESC LIMIT ?2",
@@ -1786,7 +1805,7 @@ impl Store {
             Ok(db
                 .query_row(
                     "SELECT id, service, signature, stream, source, state, began, last,
-                            seen, peak, weight, verdict, because
+                            seen, peak, weight, verdict, because, severity
                        FROM incidents WHERE id = ?1",
                     params![incident],
                     read_incident,
@@ -2047,6 +2066,9 @@ fn read_incident(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
         weight: row.get(10)?,
         verdict: row.get::<_, Option<i64>>(11)?.map(|it| it == 1),
         because: row.get(12)?,
+        severity: row
+            .get::<_, Option<String>>(13)?
+            .map(|it| Severity::of(&it)),
     })
 }
 
