@@ -1,0 +1,24 @@
+[package]
+name = "sre-logs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+chrono.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde_json.workspace = true
+sre-domain = { path = "../domain" }
+sre-source = { path = "../source" }
+thiserror.workspace = true
+tracing.workspace = true
+url = "2"
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "query", "tokio"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+
+[lints]
+workspace = true

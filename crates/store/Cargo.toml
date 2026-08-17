@@ -1,0 +1,21 @@
+[package]
+name = "sre-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+sre-domain = { path = "../domain" }
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt"] }
+tracing.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
