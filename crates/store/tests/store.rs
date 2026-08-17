@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sre_domain::{Bucket, Hour, Minute, Span, Stream};
+use sre_domain::{Bucket, Detector, Deviation, Hour, Minute, Span, Stream, Thresholds};
 use sre_store::Store;
 use tempfile::TempDir;
 
@@ -318,5 +318,169 @@ async fn forgets_the_hours_whose_time_has_passed() {
             .await
             .unwrap(),
         None
+    );
+}
+
+#[tokio::test]
+async fn sums_the_minutes_of_a_window() {
+    let base = Base::open();
+    let end = minute("2026-08-17T10:15:00Z");
+    for step in 1..=15 {
+        let at = end.back(step);
+        base.store
+            .save(
+                "logs",
+                Span::single(at),
+                vec![Bucket::counted(wifi(), at, 2.0)],
+            )
+            .await
+            .unwrap();
+    }
+    let series = base.store.windows("logs", end, 15, 4).await.unwrap();
+    assert!((series[&wifi()][0] - 30.0).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn puts_the_older_window_further_along() {
+    let base = Base::open();
+    let end = minute("2026-08-17T10:30:00Z");
+    let older = end.back(20);
+    base.store
+        .save(
+            "logs",
+            Span::single(older),
+            vec![Bucket::counted(wifi(), older, 7.0)],
+        )
+        .await
+        .unwrap();
+    let series = base.store.windows("logs", end, 15, 4).await.unwrap();
+    assert!((series[&wifi()][1] - 7.0).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn counts_a_window_without_buckets_as_zero() {
+    let base = Base::open();
+    let end = minute("2026-08-17T10:30:00Z");
+    let at = end.back(1);
+    base.store
+        .save(
+            "logs",
+            Span::single(at),
+            vec![Bucket::counted(wifi(), at, 3.0)],
+        )
+        .await
+        .unwrap();
+    let series = base.store.windows("logs", end, 15, 4).await.unwrap();
+    assert!(series[&wifi()][2].abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn takes_one_query_for_every_stream() {
+    let base = Base::open();
+    let end = minute("2026-08-17T10:15:00Z");
+    let at = end.back(1);
+    let many: Vec<Bucket> = (0..50)
+        .map(|index| Bucket::counted(Stream::new(format!("{{service=\"s{index}\"}}")), at, 1.0))
+        .collect();
+    base.store
+        .save("logs", Span::single(at), many)
+        .await
+        .unwrap();
+    assert_eq!(
+        base.store.windows("logs", end, 15, 4).await.unwrap().len(),
+        50
+    );
+}
+
+#[tokio::test]
+async fn writes_down_a_deviation() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0);
+    base.store
+        .spot(&Deviation::new("logs", &wifi(), "15m", at, verdict), at)
+        .await
+        .unwrap();
+    assert_eq!(base.store.deviations(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn writes_the_same_window_down_once() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0);
+    let deviation = Deviation::new("logs", &wifi(), "15m", at, verdict);
+    base.store.spot(&deviation, at).await.unwrap();
+    assert!(!base.store.spot(&deviation, at).await.unwrap());
+}
+
+#[tokio::test]
+async fn puts_the_heaviest_deviation_first() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let detector = Detector::new(Thresholds::default());
+    for (stream, value) in [("light", 40.0), ("heavy", 900.0)] {
+        let verdict = detector.verdict(&[4.0, 4.0, 5.0], value);
+        let stream = Stream::new(format!("{{service=\"{stream}\"}}"));
+        base.store
+            .spot(&Deviation::new("logs", &stream, "15m", at, verdict), at)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        base.store.deviations(10).await.unwrap()[0].stream,
+        Stream::new("{service=\"heavy\"}")
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_numbers_of_a_deviation() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0);
+    base.store
+        .spot(&Deviation::new("logs", &wifi(), "15m", at, verdict), at)
+        .await
+        .unwrap();
+    assert!((base.store.deviations(10).await.unwrap()[0].baseline - 4.0).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn counts_the_minutes_a_window_really_holds() {
+    let base = Base::open();
+    let end = minute("2026-08-17T10:15:00Z");
+    for step in 1..=10 {
+        base.store
+            .save("logs", Span::single(end.back(step)), vec![])
+            .await
+            .unwrap();
+    }
+    assert_eq!(base.store.covered("logs", end, 15, 4).await.unwrap()[0], 10);
+}
+
+#[tokio::test]
+async fn counts_an_unsnapped_window_as_empty() {
+    let base = Base::open();
+    let end = minute("2026-08-17T10:15:00Z");
+    base.store
+        .save("logs", Span::single(end.back(1)), vec![])
+        .await
+        .unwrap();
+    assert_eq!(base.store.covered("logs", end, 15, 4).await.unwrap()[2], 0);
+}
+
+#[tokio::test]
+async fn keeps_an_endless_score_endless() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let verdict = Detector::new(Thresholds::default()).verdict(&[0.0, 0.0, 0.0], 91.0);
+    base.store
+        .spot(&Deviation::new("logs", &wifi(), "15m", at, verdict), at)
+        .await
+        .unwrap();
+    assert!(
+        base.store.deviations(10).await.unwrap()[0]
+            .score
+            .is_infinite()
     );
 }

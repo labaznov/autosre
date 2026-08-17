@@ -16,6 +16,7 @@ pub struct Metrics {
     started: u64,
     last_bucket: AtomicU64,
     failures: AtomicU64,
+    deviations: AtomicU64,
 }
 
 impl Metrics {
@@ -26,12 +27,19 @@ impl Metrics {
             started: stamp(SystemTime::now()),
             last_bucket: AtomicU64::new(0),
             failures: AtomicU64::new(0),
+            deviations: AtomicU64::new(0),
         }
     }
 
     /// Отмечает, что бакет снят.
     pub fn bucket(&self, at: SystemTime) {
         self.last_bucket.store(stamp(at), Ordering::Relaxed);
+    }
+
+    /// Отмечает найденные отклонения.
+    pub fn deviations(&self, found: usize) {
+        self.deviations
+            .fetch_add(found.try_into().unwrap_or(0), Ordering::Relaxed);
     }
 
     /// Отмечает отказ источника или модели.
@@ -68,6 +76,12 @@ impl Metrics {
                 &last.to_string(),
             );
         }
+        counter(
+            &mut out,
+            "sre_deviations_total",
+            "Найденные отклонения",
+            &self.deviations.load(Ordering::Relaxed).to_string(),
+        );
         counter(
             &mut out,
             "sre_source_failures_total",

@@ -39,4 +39,29 @@ pub const STEPS: &[&str] = &[
     ) WITHOUT ROWID;
     CREATE INDEX IF NOT EXISTS hours_at ON hours (source, at);
     ",
+    // 2. Отклонения: окна, вышедшие за пороги детектора.
+    //
+    // Уникальность по «источник, поток, горизонт, конец окна» — не украшение:
+    // окно скользит каждую минуту, и повторная оценка того же окна не должна
+    // плодить строки.
+    "
+    CREATE TABLE IF NOT EXISTS deviations (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        source   TEXT    NOT NULL,
+        stream   TEXT    NOT NULL,
+        horizon  TEXT    NOT NULL,
+        at       INTEGER NOT NULL,
+        value    REAL    NOT NULL,
+        baseline REAL    NOT NULL,
+        -- Пусто, когда оценка бесконечна: ошибок раньше не было вовсе.
+        -- Хранить в этом случае предельное число значит показать дежурному
+        -- «оценка 1,8e308» вместо «такого не бывало».
+        score    REAL,
+        weight   REAL    NOT NULL,
+        found    INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS deviations_once
+        ON deviations (source, stream, horizon, at);
+    CREATE INDEX IF NOT EXISTS deviations_weight ON deviations (weight DESC);
+    ",
 ];

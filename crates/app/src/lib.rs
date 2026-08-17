@@ -6,6 +6,7 @@
 pub mod collector;
 pub mod config;
 pub mod metrics;
+pub mod watcher;
 pub mod web;
 
 /// Версия агента, попадающая в здоровье и в метрики.

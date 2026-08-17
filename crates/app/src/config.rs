@@ -158,8 +158,11 @@ pub struct Horizon {
     pub period: Duration,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Сколько прошлых окон составляют базовую линию.
+    #[serde(default = "default_history")]
+    pub history: usize,
     #[serde(default = "default_minimum")]
-    pub minimum: u64,
+    pub minimum: f64,
     #[serde(default = "default_score")]
     pub score: f64,
     #[serde(default = "default_ratio")]
@@ -242,6 +245,12 @@ impl File {
             if horizon.period.is_zero() || horizon.width.is_zero() {
                 return Err(ConfigError::Invalid(format!(
                     "горизонт {}: ширина и период оценки должны быть положительны",
+                    horizon.name
+                )));
+            }
+            if horizon.history == 0 {
+                return Err(ConfigError::Invalid(format!(
+                    "горизонт {}: базовая линия из нуля окон — сравнивать не с чем",
                     horizon.name
                 )));
             }
@@ -368,8 +377,11 @@ fn default_temperature() -> f32 {
 fn default_enabled() -> bool {
     true
 }
-fn default_minimum() -> u64 {
-    20
+fn default_history() -> usize {
+    24
+}
+fn default_minimum() -> f64 {
+    20.0
 }
 fn default_score() -> f64 {
     3.5

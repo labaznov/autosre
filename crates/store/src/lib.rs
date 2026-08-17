@@ -7,11 +7,12 @@
 
 pub mod schema;
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
-use sre_domain::{Bucket, Hour, Minute, Span, Stream};
+use sre_domain::{Bucket, Deviation, Hour, Minute, Span, Stream};
 use tokio::task;
 
 /// Предел ожидания на заблокированной базе.
@@ -181,6 +182,158 @@ impl Store {
                 params![source],
                 |row| row.get::<_, u64>(0),
             )?)
+        })
+        .await
+    }
+
+    /// Окна горизонта по всем потокам источника, свежие первыми.
+    ///
+    /// Один запрос на источник, а не на поток: двести сервисов — это двести
+    /// потоков, и запрос на каждый вернул бы нас к тому, от чего ушли.
+    ///
+    /// Окно 0 — последнее, оканчивающееся в `end`; окно `k` отстоит на `k`
+    /// ширин назад. Минуты без бакетов считаются нулями: их отсутствие в ряду
+    /// означает тишину, а не незнание, потому что дыры закрывает дозапрос.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn windows(
+        &self,
+        source: &str,
+        end: Minute,
+        width: usize,
+        count: usize,
+    ) -> Result<BTreeMap<Stream, Vec<f64>>, StoreError> {
+        let source = source.to_owned();
+        let seconds = i64::try_from(width).unwrap_or(15) * 60;
+        let start = end.stamp() - seconds * i64::try_from(count).unwrap_or(24);
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT stream, (?4 - at - 1) / ?5 AS window, SUM(value)
+                   FROM buckets
+                  WHERE source = ?1 AND at >= ?2 AND at < ?3
+                  GROUP BY stream, window",
+            )?;
+            let rows = query.query_map(
+                params![source, start, end.stamp(), end.stamp(), seconds],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, f64>(2)?,
+                    ))
+                },
+            )?;
+            let mut series: BTreeMap<Stream, Vec<f64>> = BTreeMap::new();
+            for row in rows {
+                let (stream, index, value) = row?;
+                let line = series
+                    .entry(Stream::new(stream))
+                    .or_insert_with(|| vec![0.0; count]);
+                if let Ok(index) = usize::try_from(index)
+                    && index < count
+                {
+                    line[index] = value;
+                }
+            }
+            Ok(series)
+        })
+        .await
+    }
+
+    /// Сколько минут каждого окна действительно снималось.
+    ///
+    /// Отсутствие бакета и отсутствие данных — разные вещи. Без этой проверки
+    /// пустая история читается как «ошибок не было», медиана выходит нулевой, и
+    /// после каждого запуска агент находит отклонение в любом живом сервисе.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn covered(
+        &self,
+        source: &str,
+        end: Minute,
+        width: usize,
+        count: usize,
+    ) -> Result<Vec<usize>, StoreError> {
+        let source = source.to_owned();
+        let seconds = i64::try_from(width).unwrap_or(15) * 60;
+        let start = end.stamp() - seconds * i64::try_from(count).unwrap_or(24);
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT (?4 - at - 1) / ?5 AS window, COUNT(*)
+                   FROM minutes
+                  WHERE source = ?1 AND at >= ?2 AND at < ?3
+                  GROUP BY window",
+            )?;
+            let rows = query.query_map(
+                params![source, start, end.stamp(), end.stamp(), seconds],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )?;
+            let mut known = vec![0; count];
+            for row in rows {
+                let (index, minutes) = row?;
+                if let Ok(index) = usize::try_from(index)
+                    && index < count
+                {
+                    known[index] = usize::try_from(minutes).unwrap_or(0);
+                }
+            }
+            Ok(known)
+        })
+        .await
+    }
+
+    /// Записывает отклонение; повторная оценка того же окна ничего не меняет.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn spot(&self, deviation: &Deviation, found: Minute) -> Result<bool, StoreError> {
+        let deviation = deviation.clone();
+        self.work(move |db| {
+            Ok(db.execute(
+                "INSERT OR IGNORE INTO deviations
+                   (source, stream, horizon, at, value, baseline, score, weight, found)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    deviation.source,
+                    deviation.stream.as_str(),
+                    deviation.horizon,
+                    deviation.at.stamp(),
+                    deviation.value,
+                    deviation.baseline,
+                    deviation.score.is_finite().then_some(deviation.score),
+                    deviation.weight,
+                    found.stamp()
+                ],
+            )? > 0)
+        })
+        .await
+    }
+
+    /// Отклонения, самые тяжёлые первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn deviations(&self, limit: usize) -> Result<Vec<Deviation>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT source, stream, horizon, at, value, baseline, score, weight
+                   FROM deviations ORDER BY weight DESC, id DESC LIMIT ?1",
+            )?;
+            let rows = query.query_map(params![limit], |row| {
+                Ok(Deviation {
+                    source: row.get(0)?,
+                    stream: Stream::new(row.get::<_, String>(1)?),
+                    horizon: row.get(2)?,
+                    at: Minute::at(row.get(3)?),
+                    value: row.get(4)?,
+                    baseline: row.get(5)?,
+                    score: row.get::<_, Option<f64>>(6)?.unwrap_or(f64::INFINITY),
+                    weight: row.get(7)?,
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
         .await
     }
