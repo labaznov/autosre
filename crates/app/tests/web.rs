@@ -743,7 +743,9 @@ async fn refuses_to_mute_forever() {
     let id = incident(&agent).await;
     let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.mute(id, "100000", &cookie).await;
-    let now = sre_domain::Minute::at(1_786_968_720);
+    // Час ставит веб-морда по своим часам, поэтому и мерить надо по ним же:
+    // с прибитой к коду отметкой этот тест протухал на следующие сутки.
+    let now = sre_domain::Minute::of(chrono::Utc::now());
     let until = agent.store.mutes(now, 10).await.unwrap()[0].until;
     assert!(until.stamp() - now.stamp() <= 91 * 24 * 60 * 60);
 }
