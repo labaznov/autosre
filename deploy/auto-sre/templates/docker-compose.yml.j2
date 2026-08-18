@@ -2,13 +2,13 @@ services:
   sreagent:
     build:
       context: /opt/docker/sreagent/src
-    image: sreagent:{{ sreagent_version | default('latest') }}
+    image: sreagent:{{ sreagent_version }}
     container_name: sreagent
     restart: unless-stopped
     env_file: /opt/docker/sreagent/.env
     command: ["/etc/sreagent/sreagent.toml"]
     ports:
-      - "{{ sreagent_port | default(8096) }}:8096"
+      - "{{ sreagent_port }}:8096"
     volumes:
       - /opt/docker/sreagent/sreagent.toml:/etc/sreagent/sreagent.toml:ro
       - /opt/data/sreagent:/opt/data/sreagent

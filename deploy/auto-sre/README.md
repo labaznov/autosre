@@ -6,6 +6,10 @@
 
 ## Что нужно задать
 
+Все переменные роли объявлены в [`defaults/main.yml`](defaults/main.yml) — там
+же значения по умолчанию и пояснения к ним. В шаблонах умолчаний нет
+намеренно: держать значение в двух местах значит однажды их развести.
+
 | Переменная | Обязательна | Что это |
 | :--- | :---: | :--- |
 | `sreagent_model_key` | да | ключ LiteLLM |
@@ -15,6 +19,11 @@
 | `sreagent_logs_url`, `sreagent_metrics_url`, `sreagent_model_url` | нет | адреса, по умолчанию боевые |
 | `sreagent_logs_password` | нет | пароль VictoriaLogs |
 | `sreagent_self_streams` | нет | селектор собственных потоков агента |
+| `sreagent_corpus`, `sreagent_corpus_raw` | нет | сбор живых данных и выдача сырья без маскирования |
+| `sreagent_port`, `sreagent_version`, `sreagent_log_level` | нет | порт, тег образа, уровень журнала |
+
+Если в инвентаре уже есть общие `victorialogs_url` и `victoriametrics_url`,
+роль возьмёт их: отдельно задавать адреса не нужно.
 
 Хеш пароля считается самим агентом:
 

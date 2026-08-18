@@ -14,15 +14,15 @@ bind = "0.0.0.0:8096"
 database = "/opt/data/sreagent/sre.db"
 
 [logs]
-url = "{{ sreagent_logs_url | default(victorialogs_url | default('http://192.0.2.12:9428')) }}"
-username = "{{ sreagent_logs_username | default('admin') }}"
+url = "{{ sreagent_logs_url }}"
+username = "{{ sreagent_logs_username }}"
 timeout = "60s"
 error_pattern = "i(error*) OR i(exception*) OR i(panic*) OR i(fatal*) OR i(traceback*)"
 # Собственные потоки агента. Без них он находит сам себя и разбирает сам себя.
-self_streams = ['{{ sreagent_self_streams | default('{container="sreagent"}') }}']
+self_streams = ['{{ sreagent_self_streams }}']
 
 [metrics]
-url = "{{ sreagent_metrics_url | default(victoriametrics_url | default('http://192.0.2.11:8428')) }}"
+url = "{{ sreagent_metrics_url }}"
 timeout = "30s"
 # Правила отбора наблюдаемых серий: универсальный набор признаков здоровья.
 select = [
@@ -35,8 +35,8 @@ select = [
 ]
 
 [model]
-url = "{{ sreagent_model_url | default('http://192.0.2.10:4000') }}"
-name = "{{ sreagent_model_name | default('gemma-4-12B-it-qat-q4_0-gguf') }}"
+url = "{{ sreagent_model_url }}"
+name = "{{ sreagent_model_name }}"
 timeout = "180s"
 max_tokens = 900
 temperature = 0.2
@@ -109,7 +109,7 @@ wider = "1h"
 patience = "15m"
 # Как часто очередь оглядывается и сколько заявка ждёт ответа дежурного.
 tick = "1m"
-answer = "{{ sreagent_answer | default('1d') }}"
+answer = "{{ sreagent_answer }}"
 
 [knowledge]
 # Рабочая копия репозитория знаний: заметки правят люди, агент только читает.
@@ -127,10 +127,10 @@ recall = 3
 # Сбор живых данных: по записи на каждый заход в модель, для подбора порогов и
 # дообучения ([ADR-0027](../../docs/adr/0027-live-corpus.md)). Выгрузка —
 # `GET /api/corpus`, построчным JSON, за входом.
-collect = {{ sreagent_corpus | default(true) | lower }}
+collect = {{ sreagent_corpus | lower }}
 # Отдавать ли сырые строки. По умолчанию адреса, идентификаторы и числа
 # маскируются: корпус уезжает из контура.
-raw = {{ sreagent_corpus_raw | default(false) | lower }}
+raw = {{ sreagent_corpus_raw | lower }}
 
 [queue]
 parallel = 4

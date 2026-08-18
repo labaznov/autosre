@@ -1,15 +1,25 @@
 ---
+# Переменные роли и их значения по умолчанию — в defaults/main.yml.
+#
+# Числа `10001` в этом файле — не произвол: под этим uid работает процесс в
+# образе (см. Dockerfile, `adduser -u 10001`). Совпадение обязательно, иначе
+# агент не запишет ни базу, ни черновики в репозиторий знаний, и падать будет
+# на первой же записи, а не при старте.
+
 - name: Проверить, что ключи заданы
   ansible.builtin.assert:
     that:
-      - sreagent_model_key | default('') | length > 0
-      - sreagent_session_key | default('') | length > 0
-      - sreagent_accounts | default([]) | length > 0
+      - sreagent_model_key | length > 0
+      - sreagent_session_key | length > 0
+      - sreagent_accounts | length > 0
     fail_msg: >-
       Нужны sreagent_model_key, sreagent_session_key и хотя бы одна учётная
       запись. Значений по умолчанию у ключей нет: без них агент не стартует.
       Хеш пароля считается командой `sreagent hash <пароль>`.
 
+# Права 0750: в /opt/docker/sreagent лежат настройки и .env с ключами, а в
+# /opt/data — база с содержимым прод-логов. Читать это посторонним на хосте
+# незачем.
 - name: Создать каталоги
   ansible.builtin.file:
     path: "{{ item }}"
@@ -22,17 +32,21 @@
     - /opt/data/sreagent
     - /opt/data/sreagent/knowledge
 
+# От имени того же uid: агент коммитит в эту копию приёмку черновиков, и
+# каталог, созданный root, сделал бы это невозможным.
 - name: Забрать рабочую копию репозитория знаний
   ansible.builtin.git:
     repo: "{{ sreagent_knowledge_repo }}"
     dest: /opt/data/sreagent/knowledge
-    version: "{{ sreagent_knowledge_branch | default('main') }}"
+    version: "{{ sreagent_knowledge_branch }}"
   become_user: "#10001"
-  when: sreagent_knowledge_repo | default('') | length > 0
+  when: sreagent_knowledge_repo | length > 0
 
+# Исходники копируются на хост и собираются там же: своего registry нет, а
+# тащить образ ниоткуда неоткуда (ADR-0023). Сборка требует сети до crates.io.
 - name: Скопировать исходники агента
   ansible.posix.synchronize:
-    src: "{{ sreagent_source | default(playbook_dir + '/../sreagent') }}/"
+    src: "{{ sreagent_source }}/"
     dest: /opt/docker/sreagent/src/
     delete: true
     rsync_opts:

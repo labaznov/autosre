@@ -28,32 +28,46 @@ impl Minute {
         Self(stamp - stamp.rem_euclid(SECONDS))
     }
 
+    /// Секунды от эпохи. В таком виде минута хранится в базе и уходит в запрос
+    /// к источнику.
     #[must_use]
     pub fn stamp(self) -> i64 {
         self.0
     }
 
+    /// Начало минуты — момент, который в неё включён.
     #[must_use]
     pub fn start(self) -> DateTime<Utc> {
         DateTime::from_timestamp(self.0, 0).unwrap_or_default()
     }
 
+    /// Конец минуты — момент, который в неё **не** включён.
+    ///
+    /// Совпадает с началом следующей: промежутки полуоткрыты, `[start, end)`.
+    /// Иначе соседние минуты делили бы одну секунду, и она считалась бы дважды.
     #[must_use]
     pub fn end(self) -> DateTime<Utc> {
         self.next().start()
     }
 
+    /// Следующая минута. Это шаг по ряду, а не конец текущей минуты: конец —
+    /// [`Minute::end`], и он момент времени, а не минута.
     #[must_use]
     pub fn next(self) -> Self {
         Self(self.0 + SECONDS)
     }
 
+    /// Предыдущая минута.
     #[must_use]
     pub fn previous(self) -> Self {
         Self(self.0 - SECONDS)
     }
 
     /// Минута, отстоящая назад на указанное число минут.
+    ///
+    /// Отрицательное число двигает вперёд: `back(-5)` — это пять минут спустя.
+    /// Так пишется обход окна в одну сторону без второго метода и без знака,
+    /// разбросанного по вызовам.
     #[must_use]
     pub fn back(self, count: i64) -> Self {
         Self(self.0 - count * SECONDS)
@@ -74,16 +88,19 @@ impl Hour {
         Self(minute.stamp() - minute.stamp().rem_euclid(HOURLY))
     }
 
+    /// Час по числу секунд от эпохи; значение выравнивается вниз.
     #[must_use]
     pub fn at(stamp: i64) -> Self {
         Self(stamp - stamp.rem_euclid(HOURLY))
     }
 
+    /// Секунды от эпохи: в таком виде час лежит в свёрнутом ряду.
     #[must_use]
     pub fn stamp(self) -> i64 {
         self.0
     }
 
+    /// Следующий час.
     #[must_use]
     pub fn next(self) -> Self {
         Self(self.0 + HOURLY)
@@ -141,31 +158,43 @@ impl Span {
         }
     }
 
+    /// Первая минута промежутка. Она в него входит.
     #[must_use]
     pub fn from(self) -> Minute {
         self.from
     }
 
+    /// Минута **за** промежутком: она в него уже не входит.
+    ///
+    /// Так граница одного промежутка совпадает с началом следующего, и при
+    /// склейке соседних минута не считается дважды.
     #[must_use]
     pub fn to(self) -> Minute {
         self.to
     }
 
+    /// Сколько минут в промежутке.
     #[must_use]
     pub fn len(self) -> usize {
         usize::try_from((self.to.stamp() - self.from.stamp()) / SECONDS).unwrap_or(0)
     }
 
+    /// Пуст ли промежуток. Собранный [`Span::new`] пустым не бывает — он для
+    /// этого и возвращает ошибку.
     #[must_use]
     pub fn is_empty(self) -> bool {
         self.len() == 0
     }
 
+    /// Ширина промежутка временем, а не числом минут: в таком виде её ждут
+    /// запросы к источникам.
     #[must_use]
     pub fn width(self) -> TimeDelta {
         self.to.start() - self.from.start()
     }
 
+    /// Входит ли минута в промежуток. Последняя минута — та, что перед
+    /// [`Span::to`], сама `to` уже снаружи.
     #[must_use]
     pub fn contains(self, minute: Minute) -> bool {
         minute >= self.from && minute < self.to
