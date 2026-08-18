@@ -78,7 +78,8 @@ ratio = 3.0
 
 [[account]]
 login = "duty"
-# Хеш пароля. Получить: sreagent hash <пароль>
+# Хеш пароля. Получить: sreagent hash <пароль>. Здесь лежит хеш от `sreagent-lab`
+# — пароля лаборатории, записанного открыто. На стенде подставьте свой.
 password = "$argon2id$v=19$m=19456,t=2,p=1$N37Zjt7tGuTCu2B+BSpYRg$XeW5g91ZGp+auvy/iHsxYZVjWU4AtGqpmMudBuLJNHM"
 
 [incidents]

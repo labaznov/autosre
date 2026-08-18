@@ -27,7 +27,7 @@ docker run --rm sreagent:latest hash 'пароль'
 ## Запуск
 
 ```bash
-ansible-playbook -i inventory/all-01-prod sreagent.yaml
+ansible-playbook -i inventory/prod sreagent.yaml
 ```
 
 Роль копирует исходники на хост и собирает образ там же: сборка Rust требует
