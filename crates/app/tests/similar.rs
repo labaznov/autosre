@@ -71,6 +71,15 @@ async fn answer(State(talk): State<Talk>, body: String) -> String {
     )
 }
 
+/// Клиент модели, складывающий каждый заход в корпус: так поднимает его агент
+/// со включённым сбором живых данных.
+fn recording(model: Model, store: &Store) -> Model {
+    model.recording(Arc::new(sre_app::scribe::Scribe::new(
+        store,
+        &Arc::new(Metrics::new("тест")),
+    )))
+}
+
 struct Stand {
     store: Store,
     seen: Arc<std::sync::Mutex<String>>,
@@ -113,7 +122,7 @@ impl Stand {
             axum::serve(listener, router).await.expect("сервер упал");
         });
 
-        let model = Arc::new(
+        let model = Arc::new(recording(
             Model::new(Settings {
                 url: format!("http://{address}/")
                     .parse()
@@ -125,7 +134,8 @@ impl Stand {
                 timeout: Duration::from_secs(5),
             })
             .expect("клиент не собрался"),
-        );
+            &store,
+        ));
         let sources: Vec<Arc<dyn Source>> = vec![Arc::new(Talker)];
         dig(Digger::new(
             &sources,
@@ -258,4 +268,33 @@ async fn keeps_how_bad_it_is_by_the_word_of_the_model() {
         stand.store.one(incident).await.unwrap().unwrap().severity,
         Some(sre_domain::Severity::High)
     );
+}
+
+#[tokio::test]
+async fn keeps_what_it_asked_the_model_when_collecting() {
+    let stand = Stand::start("vl-no-space-left").await;
+    let incident = stand.incident().await;
+    stand.done(incident).await;
+    for _ in 0..20 {
+        if stand.store.learned().await.unwrap() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(stand.store.learned().await.unwrap() > 0);
+}
+
+#[tokio::test]
+async fn ties_a_lesson_to_the_incident_it_came_from() {
+    let stand = Stand::start("vl-no-space-left").await;
+    let incident = stand.incident().await;
+    stand.done(incident).await;
+    for _ in 0..20 {
+        if stand.store.learned().await.unwrap() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let lessons = stand.store.lessons(0, 10).await.unwrap();
+    assert_eq!(lessons[0].incident, Some(incident));
 }

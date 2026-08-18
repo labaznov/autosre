@@ -284,4 +284,28 @@ pub const STEPS: &[&str] = &[
     "
     ALTER TABLE incidents ADD COLUMN severity TEXT;
     ",
+    // 16. Уроки: что уходило в модель и что она ответила.
+    //
+    // Хранится **то, что было отправлено**, а не то, что можно собрать заново:
+    // промпты меняются вместе с агентом, и корпус, собранный по нынешним
+    // шаблонам из прошлогодних данных, учит модель тому, чего никогда не было.
+    //
+    // Метку к уроку ставит не агент, а дежурный — своей оценкой инцидента.
+    // Поэтому урок держит номер инцидента: без него это просто переписка с
+    // моделью, а с ним — пример с ответом, годный для дообучения.
+    "
+    CREATE TABLE IF NOT EXISTS lessons (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        at            INTEGER NOT NULL,
+        kind          TEXT    NOT NULL,
+        model         TEXT    NOT NULL,
+        incident      INTEGER,
+        investigation INTEGER,
+        system        TEXT    NOT NULL,
+        ask           TEXT    NOT NULL,
+        answer        TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS lessons_at ON lessons (at);
+    CREATE INDEX IF NOT EXISTS lessons_incident ON lessons (incident);
+    ",
 ];

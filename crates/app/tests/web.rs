@@ -1125,3 +1125,100 @@ async fn says_nothing_about_severity_before_a_conclusion() {
         .unwrap();
     assert!(!page.contains("работа не делается"));
 }
+
+/// Записывает урок так, как его записал бы писарь.
+async fn taught(agent: &Agent, incident: Option<i64>, ask: &str) -> i64 {
+    agent
+        .store
+        .learn(
+            &sre_store::Lesson {
+                kind: "conclusion".to_owned(),
+                model: "поддельная".to_owned(),
+                incident,
+                investigation: None,
+                system: "Ты — Auto SRE".to_owned(),
+                ask: ask.to_owned(),
+                answer: "{\"cause\":\"апстрим молчит\"}".to_owned(),
+            },
+            sre_domain::Minute::at(1_786_968_660),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn gives_out_the_corpus_line_by_line() {
+    let agent = Agent::start().await;
+    taught(&agent, None, "Сервис: orders-api").await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let body = agent
+        .inside("/api/corpus", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("\"role\":\"assistant\""));
+}
+
+#[tokio::test]
+async fn masks_the_addresses_of_the_corpus() {
+    let agent = Agent::start().await;
+    taught(&agent, None, "upstream 192.0.2.19 timed out").await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let body = agent
+        .inside("/api/corpus", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(!body.contains("192.0.2.19"));
+}
+
+#[tokio::test]
+async fn hands_the_verdict_of_the_duty_engineer_with_the_lesson() {
+    let agent = Agent::start().await;
+    let id = incident(&agent).await;
+    taught(&agent, Some(id), "Сервис: orders-api").await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    agent.judge(id, "yes", &cookie).await;
+    let body = agent
+        .inside("/api/corpus", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("\"verdict\":true"));
+}
+
+#[tokio::test]
+async fn gives_out_the_corpus_in_portions() {
+    let agent = Agent::start().await;
+    let first = taught(&agent, None, "первый").await;
+    taught(&agent, None, "второй").await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let body = agent
+        .inside(&format!("/api/corpus?after={first}"), &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body.lines().count(), 1);
+}
+
+#[tokio::test]
+async fn keeps_the_corpus_from_a_stranger() {
+    let agent = Agent::start().await;
+    assert_eq!(agent.get("/api/corpus").await.status(), 303);
+}

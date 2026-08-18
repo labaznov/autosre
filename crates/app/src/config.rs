@@ -105,6 +105,8 @@ pub struct File {
     #[serde(default)]
     pub knowledge: Knowledge,
     #[serde(default)]
+    pub corpus: Corpus,
+    #[serde(default)]
     pub queue: Queue,
     #[serde(default)]
     pub retention: Retention,
@@ -263,6 +265,39 @@ pub struct Digging {
     rest: BTreeMap<String, toml::Value>,
 }
 
+/// Сбор живых данных.
+///
+/// Выключен по умолчанию: корпус — это прод-логи, сложенные в отдельное место
+/// и предназначенные к вывозу наружу, и включаться это должно осознанно
+/// ([ADR-0027](../../../docs/adr/0027-live-corpus.md)).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Corpus {
+    /// Собирать ли заходы в модель.
+    #[serde(default)]
+    pub collect: bool,
+    /// Выгружать сырые строки прод-логов как есть.
+    ///
+    /// По умолчанию адреса, идентификаторы и числа маскируются на выгрузке:
+    /// корпус уезжает из контура, а сигнатура ошибки от маскирования не
+    /// страдает — она и так маскированная.
+    #[serde(default)]
+    pub raw: bool,
+    #[serde(flatten)]
+    rest: BTreeMap<String, toml::Value>,
+}
+
+impl Corpus {
+    /// Те же настройки, но со сбором: стенд без него ничего не покажет.
+    #[must_use]
+    pub fn collecting(self, raw: bool) -> Self {
+        Self {
+            collect: true,
+            raw,
+            ..self
+        }
+    }
+}
+
 /// База знаний: рабочая копия чужого репозитория.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Knowledge {
@@ -390,6 +425,7 @@ impl File {
         collect("incidents", &self.incidents.rest, &mut found);
         collect("digging", &self.digging.rest, &mut found);
         collect("knowledge", &self.knowledge.rest, &mut found);
+        collect("corpus", &self.corpus.rest, &mut found);
         collect("queue", &self.queue.rest, &mut found);
         collect("retention", &self.retention.rest, &mut found);
         for horizon in &self.horizons {

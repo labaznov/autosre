@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use askama::Template;
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -17,7 +17,7 @@ use serde::Deserialize;
 use sre_domain::Minute;
 use sre_store::Store;
 
-use crate::config::Knowledge;
+use crate::config::{Corpus, Knowledge};
 use crate::metrics::Metrics;
 use crate::reporter::{Reporter, single};
 use crate::session::{COOKIE, Doorman};
@@ -33,6 +33,7 @@ pub struct Shared {
     store: Store,
     doorman: Arc<Doorman>,
     knowledge: Knowledge,
+    corpus: Corpus,
     reporter: Option<Reporter>,
     version: &'static str,
 }
@@ -51,8 +52,18 @@ impl Shared {
             store,
             doorman: Arc::new(doorman),
             knowledge: knowledge.clone(),
+            corpus: Corpus::default(),
             reporter: None,
             version,
+        }
+    }
+
+    /// Та же обвязка, знающая, как выгружать корпус.
+    #[must_use]
+    pub fn collecting(self, corpus: &Corpus) -> Self {
+        Self {
+            corpus: corpus.clone(),
+            ..self
         }
     }
 
@@ -89,6 +100,7 @@ pub fn routes(shared: Shared) -> Router {
         .route("/incident/{id}/merge", post(merge))
         .route("/incident/{id}/split", post(split))
         .route("/series", get(series))
+        .route("/api/corpus", get(corpus))
         .route("/reports", get(shelf))
         .route("/report/{kind}/{name}", get(page))
         .route("/incident/{id}/report", post(sum_up))
@@ -255,6 +267,96 @@ async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
 /// Сколько всего ждёт руки дежурного: заявки плюс непринятые черновики.
 async fn waits(shared: &Shared) -> usize {
     pending(shared).await.len() + shared.store.unsettled(100).await.unwrap_or_default().len()
+}
+
+#[derive(Debug, Deserialize)]
+struct Portion {
+    /// Отдавать уроки после этого номера: выгрузка идёт частями.
+    #[serde(default)]
+    after: i64,
+    #[serde(default = "portion")]
+    limit: usize,
+}
+
+fn portion() -> usize {
+    500
+}
+
+/// Выгрузка корпуса живых данных построчным JSON.
+///
+/// По строке на заход в модель: сообщения в том виде, в каком их принимает
+/// дообучение, плюс метка дежурного, ради которой всё и копилось. Части
+/// берутся по номеру последнего урока — корпус растёт, и выгружать его целиком
+/// каждый раз незачем.
+///
+/// Вход обязателен: в корпусе лежат прод-логи
+/// ([ADR-0020](../../../docs/adr/0020-login-and-password.md)).
+async fn corpus(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Query(portion): Query<Portion>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    match shared
+        .store
+        .lessons(portion.after, portion.limit.clamp(1, 5000))
+        .await
+    {
+        Ok(lessons) => {
+            tracing::info!(
+                who,
+                lessons = lessons.len(),
+                raw = shared.corpus.raw,
+                "корпус выгружен"
+            );
+            let hide = !shared.corpus.raw;
+            let lines = lessons
+                .iter()
+                .map(|lesson| line(lesson, hide))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (
+                [("content-type", "application/x-ndjson; charset=utf-8")],
+                lines,
+            )
+                .into_response()
+        }
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
+}
+
+/// Один урок строкой JSON.
+///
+/// Маскирование по умолчанию: корпус уезжает из контура, а сигнатура ошибки от
+/// замены адресов и чисел не страдает — она и так маскированная.
+fn line(lesson: &sre_store::Learned, hide: bool) -> String {
+    let text = |it: &str| {
+        if hide {
+            sre_domain::signature::mask(it)
+        } else {
+            it.to_owned()
+        }
+    };
+    serde_json::json!({
+        "id": lesson.id,
+        "at": lesson.at.start().to_rfc3339(),
+        "kind": lesson.kind,
+        "model": lesson.model,
+        "messages": [
+            {"role": "system", "content": lesson.system},
+            {"role": "user", "content": text(&lesson.ask)},
+            {"role": "assistant", "content": text(&lesson.answer)},
+        ],
+        "incident": lesson.incident,
+        "service": lesson.service,
+        "signature": lesson.signature,
+        "verdict": lesson.verdict,
+        "severity": lesson.severity,
+        "state": lesson.state,
+    })
+    .to_string()
 }
 
 #[derive(Template)]

@@ -10,6 +10,7 @@
 pub mod prompt;
 pub mod schema;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -84,12 +85,37 @@ pub struct Picture {
     pub picture: String,
 }
 
+/// Куда уходит запись о заходе в модель.
+///
+/// Клиент модели не знает ни про базу, ни про то, зачем это кому-то нужно: он
+/// отдаёт то, что отправил, и то, что получил. Собирать из этого корпус —
+/// работа приложения.
+pub trait Ledger: Send + Sync {
+    fn keep(&self, lesson: Told);
+}
+
+/// Один заход в модель целиком, как он был сделан.
+///
+/// Промпт хранится **отправленным**, а не собранным заново: шаблоны меняются
+/// вместе с агентом, и корпус, восстановленный по нынешним, учит модель тому,
+/// чего никогда не происходило.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Told {
+    /// Чего просили: `triage`, `conclusion` или `picture`.
+    pub kind: &'static str,
+    pub model: String,
+    pub system: String,
+    pub ask: String,
+    pub answer: String,
+}
+
 /// Клиент модели.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Model {
     http: reqwest::Client,
     endpoint: Url,
     settings: Settings,
+    ledger: Option<Arc<dyn Ledger>>,
 }
 
 impl Model {
@@ -109,7 +135,20 @@ impl Model {
                 .join(ENDPOINT)
                 .map_err(|cause| ModelError::Transport(cause.to_string()))?,
             settings,
+            ledger: None,
         })
+    }
+
+    /// Тот же клиент, записывающий каждый заход.
+    ///
+    /// Необязательная: без сбора живых данных агент работает точно так же, и
+    /// включается сбор осознанно ([ADR-0027](../../../docs/adr/0027-live-corpus.md)).
+    #[must_use]
+    pub fn recording(self, ledger: Arc<dyn Ledger>) -> Self {
+        Self {
+            ledger: Some(ledger),
+            ..self
+        }
     }
 
     #[must_use]
@@ -122,7 +161,8 @@ impl Model {
     /// # Errors
     /// [`ModelError`] при недоступности модели или ответе мимо схемы.
     pub async fn triage(&self, about: &str) -> Result<Triage, ModelError> {
-        self.ask(prompt::SIFTER, about, schema::triage()).await
+        self.ask("triage", prompt::SIFTER, about, schema::triage())
+            .await
     }
 
     /// Разбор всплеска: причина, уверенность, рекомендация.
@@ -131,7 +171,8 @@ impl Model {
     /// [`ModelError`] при недоступности модели или ответе мимо схемы.
     pub async fn conclude(&self, skill: &str, dossier: &str) -> Result<Conclusion, ModelError> {
         let system = format!("{}\n\n{skill}", prompt::ANALYST);
-        self.ask(&system, dossier, schema::conclusion()).await
+        self.ask("conclusion", &system, dossier, schema::conclusion())
+            .await
     }
 
     /// Общая картина для отчёта: три-четыре предложения по числам.
@@ -139,7 +180,7 @@ impl Model {
     /// # Errors
     /// [`ModelError`] при недоступности модели или ответе мимо схемы.
     pub async fn summary(&self, facts: &str) -> Result<String, ModelError> {
-        self.ask::<Picture>(prompt::WRITER, facts, schema::picture())
+        self.ask::<Picture>("picture", prompt::WRITER, facts, schema::picture())
             .await
             .map(|it| it.picture)
     }
@@ -147,6 +188,7 @@ impl Model {
     /// Один заход в модель со схемой ответа.
     async fn ask<T: serde::de::DeserializeOwned>(
         &self,
+        kind: &'static str,
         system: &str,
         user: &str,
         schema: Value,
@@ -184,13 +226,19 @@ impl Model {
                 body: clip(&body),
             });
         }
-        serde_json::from_str::<Answer>(&body)
+        let content = serde_json::from_str::<Answer>(&body)
             .map_err(|cause| ModelError::Shape(cause.to_string()))?
-            .content()
-            .and_then(|content| {
-                serde_json::from_str(bare(&content))
-                    .map_err(|cause| ModelError::Shape(cause.to_string()))
-            })
+            .content()?;
+        if let Some(ledger) = &self.ledger {
+            ledger.keep(Told {
+                kind,
+                model: self.settings.name.clone(),
+                system: system.to_owned(),
+                ask: user.to_owned(),
+                answer: content.clone(),
+            });
+        }
+        serde_json::from_str(bare(&content)).map_err(|cause| ModelError::Shape(cause.to_string()))
     }
 }
 

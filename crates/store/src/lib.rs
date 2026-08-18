@@ -92,6 +92,39 @@ pub struct Reached<'a> {
     pub severity: Severity,
 }
 
+/// Урок: один заход в модель целиком, как он был сделан.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lesson {
+    /// Чего просили: `triage`, `conclusion` или `picture`.
+    pub kind: String,
+    pub model: String,
+    pub incident: Option<i64>,
+    pub investigation: Option<i64>,
+    pub system: String,
+    pub ask: String,
+    pub answer: String,
+}
+
+/// Урок вместе с тем, чем он кончился.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Learned {
+    pub id: i64,
+    pub at: Minute,
+    pub kind: String,
+    pub model: String,
+    pub incident: Option<i64>,
+    pub system: String,
+    pub ask: String,
+    pub answer: String,
+    /// Сервис и сигнатура инцидента: без них пример нечем разметить.
+    pub service: Option<String>,
+    pub signature: Option<String>,
+    /// Оценка дежурного — та самая метка, ради которой всё и копится.
+    pub verdict: Option<bool>,
+    pub severity: Option<String>,
+    pub state: Option<String>,
+}
+
 /// Заявка в том виде, в каком её читают.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asked {
@@ -1005,6 +1038,83 @@ impl Store {
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Записывает урок: что ушло в модель и что она ответила.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn learn(&self, lesson: &Lesson, at: Minute) -> Result<i64, StoreError> {
+        let lesson = lesson.clone();
+        self.work(move |db| {
+            db.execute(
+                "INSERT INTO lessons
+                   (at, kind, model, incident, investigation, system, ask, answer)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    at.stamp(),
+                    lesson.kind,
+                    lesson.model,
+                    lesson.incident,
+                    lesson.investigation,
+                    lesson.system,
+                    lesson.ask,
+                    lesson.answer
+                ],
+            )?;
+            Ok(db.last_insert_rowid())
+        })
+        .await
+    }
+
+    /// Уроки вместе с тем, чем они кончились: оценкой дежурного.
+    ///
+    /// Пример без метки для дообучения бесполезен, а метку ставит человек и
+    /// сильно позже, поэтому она приезжает соединением, а не полем урока.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn lessons(&self, after: i64, limit: usize) -> Result<Vec<Learned>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT l.id, l.at, l.kind, l.model, l.incident, l.system, l.ask, l.answer,
+                        n.service, n.signature, n.verdict, n.severity, n.state
+                   FROM lessons l LEFT JOIN incidents n ON n.id = l.incident
+                  WHERE l.id > ?1 ORDER BY l.id LIMIT ?2",
+            )?;
+            let rows = query.query_map(params![after, limit], |row| {
+                Ok(Learned {
+                    id: row.get(0)?,
+                    at: Minute::at(row.get(1)?),
+                    kind: row.get(2)?,
+                    model: row.get(3)?,
+                    incident: row.get(4)?,
+                    system: row.get(5)?,
+                    ask: row.get(6)?,
+                    answer: row.get(7)?,
+                    service: row.get(8)?,
+                    signature: row.get(9)?,
+                    verdict: row.get::<_, Option<i64>>(10)?.map(|it| it == 1),
+                    severity: row.get(11)?,
+                    state: row.get(12)?,
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Сколько уроков накоплено.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn learned(&self) -> Result<u64, StoreError> {
+        self.work(move |db| {
+            Ok(db.query_row("SELECT COUNT(*) FROM lessons", [], |row| {
+                row.get::<_, u64>(0)
+            })?)
         })
         .await
     }

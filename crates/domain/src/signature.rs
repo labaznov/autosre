@@ -51,12 +51,7 @@ impl Signature {
     #[must_use]
     pub fn of(message: &str) -> Self {
         let squeezed = message.split_whitespace().collect::<Vec<_>>().join(" ");
-        let masked = UUID.replace_all(&squeezed, "<uuid>");
-        let masked = ADDRESS.replace_all(&masked, "<addr>");
-        let masked = PATH.replace_all(&masked, "<path>");
-        let masked = HEX.replace_all(&masked, "<hex>");
-        let masked = NUMBER.replace_all(&masked, "<n>");
-        Self(clip(&masked, LIMIT))
+        Self(clip(&mask(&squeezed), LIMIT))
     }
 
     /// Сигнатура выделенного потока: родительская плюс сам поток.
@@ -81,6 +76,23 @@ impl std::fmt::Display for Signature {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         out.write_str(&self.0)
     }
+}
+
+/// Заменяет изменчивые части текста заглушками.
+///
+/// Порядок важен: сначала то, что длиннее и специфичнее, иначе маска чисел
+/// съест половину адреса и склеит несклеиваемое.
+///
+/// Отдельно от [`Signature::of`], потому что маскировать приходится не только
+/// сообщение: в корпусе для дообучения тем же способом гасятся адреса и
+/// идентификаторы, а длину там резать нельзя — обрезанный пример учит плохому.
+#[must_use]
+pub fn mask(text: &str) -> String {
+    let masked = UUID.replace_all(text, "<uuid>");
+    let masked = ADDRESS.replace_all(&masked, "<addr>");
+    let masked = PATH.replace_all(&masked, "<path>");
+    let masked = HEX.replace_all(&masked, "<hex>");
+    NUMBER.replace_all(&masked, "<n>").into_owned()
 }
 
 /// Группа сообщений с одной сигнатурой: счётчик и живой образец.

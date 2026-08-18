@@ -123,6 +123,15 @@ refresh = "5m"
 # Сколько заметок уходит в досье расследования.
 recall = 3
 
+[corpus]
+# Сбор живых данных: по записи на каждый заход в модель, для подбора порогов и
+# дообучения ([ADR-0027](../../docs/adr/0027-live-corpus.md)). Выгрузка —
+# `GET /api/corpus`, построчным JSON, за входом.
+collect = {{ sreagent_corpus | default(true) | lower }}
+# Отдавать ли сырые строки. По умолчанию адреса, идентификаторы и числа
+# маскируются: корпус уезжает из контура.
+raw = {{ sreagent_corpus_raw | default(false) | lower }}
+
 [queue]
 parallel = 4
 patience = "15m"

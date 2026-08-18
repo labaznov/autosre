@@ -7,7 +7,7 @@ use std::sync::Arc;
 use sre_app::config::{Config, Process};
 use sre_app::metrics::Metrics;
 use sre_app::session::Doorman;
-use sre_app::{VERSION, collector, digger, grouper, librarian, reporter, watcher, web};
+use sre_app::{VERSION, collector, digger, grouper, librarian, reporter, scribe, watcher, web};
 use sre_logs::{Filter, Logs};
 use sre_source::Source;
 use sre_store::Store;
@@ -98,14 +98,23 @@ async fn serve() -> Result<(), Failure> {
     );
     collector::tidy(&sources, &store, &config.file.retention);
     watcher::watch(&sources, &store, &metrics, &config.file.enabled());
-    let model = Arc::new(sre_model::Model::new(sre_model::Settings {
+    let talker = sre_model::Model::new(sre_model::Settings {
         url: config.file.model.url.parse()?,
         key: config.secrets.model.clone(),
         name: config.file.model.name.clone(),
         temperature: config.file.model.temperature,
         tokens: config.file.model.max_tokens,
         timeout: config.file.model.timeout,
-    })?);
+    })?;
+    let model = Arc::new(if config.file.corpus.collect {
+        tracing::info!(
+            raw = config.file.corpus.raw,
+            "сбор живых данных включён: каждый заход в модель ложится в корпус"
+        );
+        talker.recording(Arc::new(scribe::Scribe::new(&store, &metrics)))
+    } else {
+        talker
+    });
     grouper::group(&sources, &store, &metrics, &model, &config.file.incidents);
 
     librarian::learn(&store, &metrics, &config.file.knowledge).await;
@@ -153,7 +162,8 @@ async fn serve() -> Result<(), Failure> {
         &config.file.knowledge,
         VERSION,
     )
-    .writing(scribe);
+    .writing(scribe)
+    .collecting(&config.file.corpus);
     let listener = tokio::net::TcpListener::bind(config.file.bind).await?;
     tracing::info!(
         address = %config.file.bind,

@@ -25,6 +25,7 @@ pub struct Metrics {
     reports: AtomicU64,
     hushed: AtomicU64,
     dodged: AtomicU64,
+    lessons: AtomicU64,
     drafts: AtomicU64,
     inquiries: AtomicU64,
     answered: AtomicU64,
@@ -131,6 +132,7 @@ impl Metrics {
             reports: AtomicU64::new(0),
             hushed: AtomicU64::new(0),
             dodged: AtomicU64::new(0),
+            lessons: AtomicU64::new(0),
             drafts: AtomicU64::new(0),
             inquiries: AtomicU64::new(0),
             answered: AtomicU64::new(0),
@@ -213,6 +215,11 @@ impl Metrics {
         self.dodged.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Отмечает записанный урок: один заход в модель, ушедший в корпус.
+    pub fn taught(&self) {
+        self.lessons.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Отмечает написанный черновик заметки.
     pub fn drafted(&self) {
         self.drafts.fetch_add(1, Ordering::Relaxed);
@@ -282,6 +289,12 @@ impl Metrics {
             "sre_hushed_total",
             "Отклонения, приглушённые человеком",
             &self.hushed.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_lessons_total",
+            "Заходы в модель, записанные в корпус живых данных",
+            &self.lessons.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
