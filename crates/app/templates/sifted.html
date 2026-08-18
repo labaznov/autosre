@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Отсеянное — Агент диагностики{% endblock %}
+
+{% block nav %}
+<nav>
+  {% include "badge.html" %}
+  <a href="/">к ленте</a>
+  <span class="who">{{ who }}</span>
+  <form method="post" action="/logout"><button class="plain">выйти</button></form>
+</nav>
+{% endblock %}
+
+{% block content %}
+<h1 class="page">Отсеянное за сутки</h1>
+
+<p class="hint">Это то, о чём агент решил промолчать. Инцидента у них нет и в
+ленту они не попадают — проверить решение можно только здесь.</p>
+
+{% if sifted.is_empty() %}
+  <p class="empty">За сутки отсев ничего не гасил</p>
+{% endif %}
+
+{% for it in sifted %}
+  <article class="incident">
+    <header>
+      <span class="state">отсеяно</span>
+      <span class="service">{{ it.service }}</span>
+      <span class="stamp">{{ it.at }} · {{ it.source }} · {{ it.horizon }}</span>
+    </header>
+    <p class="signature">{{ it.because }}</p>
+    <p class="numbers">
+      за окно {{ it.value }} против обычного {{ it.baseline }} ·
+      <code>{{ it.stream }}</code>
+    </p>
+    <footer class="verdict">
+      {% if let Some(right) = it.verdict %}
+        {% if right %}<span class="judged">погашено верно</span>
+        {% else %}<span class="judged">зря промолчал</span>{% endif %}
+        {% if let Some(judge) = it.judge %}<span class="judged">· {{ judge }}</span>{% endif %}
+      {% else %}
+        <form method="post" action="/deviation/{{ it.id }}/verdict">
+          <input type="hidden" name="useful" value="yes"><button>верно погашено</button>
+        </form>
+        <form method="post" action="/deviation/{{ it.id }}/verdict">
+          <input type="hidden" name="useful" value="no"><button>зря, это было важно</button>
+        </form>
+      {% endif %}
+    </footer>
+  </article>
+{% endfor %}
+{% endblock %}

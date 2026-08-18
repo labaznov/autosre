@@ -92,6 +92,23 @@ pub struct Reached<'a> {
     pub severity: Severity,
 }
 
+/// Отсеянное отклонение в том виде, в каком его читает дежурный.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sifted {
+    pub id: i64,
+    pub source: String,
+    pub stream: Stream,
+    pub horizon: String,
+    pub at: Minute,
+    pub value: f64,
+    pub baseline: f64,
+    /// Чем отсев объяснил своё решение.
+    pub because: String,
+    /// Оценка дежурного: `Some(false)` — отсеяли зря.
+    pub verdict: Option<bool>,
+    pub judge: Option<String>,
+}
+
 /// Урок: один заход в модель целиком, как он был сделан.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lesson {
@@ -100,6 +117,8 @@ pub struct Lesson {
     pub model: String,
     pub incident: Option<i64>,
     pub investigation: Option<i64>,
+    /// Отклонение, о котором спрашивали отсев.
+    pub deviation: Option<i64>,
     pub system: String,
     pub ask: String,
     pub answer: String,
@@ -662,6 +681,68 @@ impl Store {
         .await
     }
 
+    /// Отсеянные отклонения промежутка, самые тяжёлые первыми.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе чтения.
+    pub async fn sifts(
+        &self,
+        from: Minute,
+        to: Minute,
+        limit: usize,
+    ) -> Result<Vec<Sifted>, StoreError> {
+        self.work(move |db| {
+            let mut query = db.prepare(
+                "SELECT id, source, stream, horizon, at, value, baseline, sifted, verdict, judge
+                   FROM deviations
+                  WHERE sifted IS NOT NULL AND found >= ?1 AND found < ?2
+                  ORDER BY weight DESC, id DESC LIMIT ?3",
+            )?;
+            let rows = query.query_map(params![from.stamp(), to.stamp(), limit], |row| {
+                Ok(Sifted {
+                    id: row.get(0)?,
+                    source: row.get(1)?,
+                    stream: Stream::new(row.get::<_, String>(2)?),
+                    horizon: row.get(3)?,
+                    at: Minute::at(row.get(4)?),
+                    value: row.get(5)?,
+                    baseline: row.get(6)?,
+                    because: row.get(7)?,
+                    verdict: row.get::<_, Option<i64>>(8)?.map(|it| it == 1),
+                    judge: row.get(9)?,
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Записывает оценку дежурного на отсеянное отклонение.
+    ///
+    /// `false` означает «отсеяли зря» — единственный способ узнать, что модель
+    /// глушит нужное. Без этой оценки отрицательные примеры корпуса не
+    /// размечены ([ADR-0027](../../../docs/adr/0027-live-corpus.md)).
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn judge_sift(
+        &self,
+        deviation: i64,
+        right: bool,
+        who: &str,
+        when: Minute,
+    ) -> Result<bool, StoreError> {
+        let who = who.to_owned();
+        self.work(move |db| {
+            Ok(db.execute(
+                "UPDATE deviations SET verdict = ?2, judge = ?3, judged = ?4
+                  WHERE id = ?1 AND sifted IS NOT NULL",
+                params![deviation, i64::from(right), who, when.stamp()],
+            )? > 0)
+        })
+        .await
+    }
+
     /// Привязывает отклонение к инциденту: открывает новый или продлевает
     /// открытый с той же парой «сервис плюс сигнатура».
     ///
@@ -1051,14 +1132,15 @@ impl Store {
         self.work(move |db| {
             db.execute(
                 "INSERT INTO lessons
-                   (at, kind, model, incident, investigation, system, ask, answer)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                   (at, kind, model, incident, investigation, deviation, system, ask, answer)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     at.stamp(),
                     lesson.kind,
                     lesson.model,
                     lesson.incident,
                     lesson.investigation,
+                    lesson.deviation,
                     lesson.system,
                     lesson.ask,
                     lesson.answer
@@ -1080,8 +1162,11 @@ impl Store {
         self.work(move |db| {
             let mut query = db.prepare(
                 "SELECT l.id, l.at, l.kind, l.model, l.incident, l.system, l.ask, l.answer,
-                        n.service, n.signature, n.verdict, n.severity, n.state
-                   FROM lessons l LEFT JOIN incidents n ON n.id = l.incident
+                        n.service, n.signature,
+                        COALESCE(n.verdict, d.verdict), n.severity, n.state
+                   FROM lessons l
+                   LEFT JOIN incidents n ON n.id = l.incident
+                   LEFT JOIN deviations d ON d.id = l.deviation
                   WHERE l.id > ?1 ORDER BY l.id LIMIT ?2",
             )?;
             let rows = query.query_map(params![after, limit], |row| {

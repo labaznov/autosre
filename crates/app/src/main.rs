@@ -163,7 +163,8 @@ async fn serve() -> Result<(), Failure> {
         VERSION,
     )
     .writing(scribe)
-    .collecting(&config.file.corpus);
+    .collecting(&config.file.corpus)
+    .grouping(&config.file.incidents);
     let listener = tokio::net::TcpListener::bind(config.file.bind).await?;
     tracing::info!(
         address = %config.file.bind,

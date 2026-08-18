@@ -43,19 +43,23 @@ pub async fn watch<T>(work: impl Future<Output = T>) -> (T, Vec<Told>) {
     .await
 }
 
-/// Складывает заходы в корпус, пометив их инцидентом и расследованием.
-pub async fn keep(
-    store: &Store,
-    metrics: &Metrics,
-    told: Vec<Told>,
-    about: (Option<i64>, Option<i64>),
-) {
+/// К чему относится урок: без этого его нечем разметить.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct About {
+    pub incident: Option<i64>,
+    pub investigation: Option<i64>,
+    pub deviation: Option<i64>,
+}
+
+/// Складывает заходы в корпус, пометив их тем, к чему они относятся.
+pub async fn keep(store: &Store, metrics: &Metrics, told: Vec<Told>, about: About) {
     for one in told {
         let lesson = Lesson {
             kind: one.kind.to_owned(),
             model: one.model,
-            incident: about.0,
-            investigation: about.1,
+            incident: about.incident,
+            investigation: about.investigation,
+            deviation: about.deviation,
             system: one.system,
             ask: one.ask,
             answer: one.answer,

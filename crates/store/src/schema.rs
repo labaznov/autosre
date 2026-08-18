@@ -308,4 +308,17 @@ pub const STEPS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS lessons_at ON lessons (at);
     CREATE INDEX IF NOT EXISTS lessons_incident ON lessons (incident);
     ",
+    // 17. Оценка отсеянного.
+    //
+    // Отсеянное дежурный не видел никогда, поэтому у отрицательных примеров
+    // корпуса не было метки: «модель сказала шум» — и всё, проверить некому
+    // ([ADR-0027](../../../docs/adr/0027-live-corpus.md)). Теперь у отклонения
+    // есть та же оценка, что у инцидента, и урок отсева знает своё отклонение.
+    "
+    ALTER TABLE deviations ADD COLUMN verdict INTEGER;
+    ALTER TABLE deviations ADD COLUMN judge TEXT;
+    ALTER TABLE deviations ADD COLUMN judged INTEGER;
+    ALTER TABLE lessons ADD COLUMN deviation INTEGER;
+    CREATE INDEX IF NOT EXISTS deviations_sifted ON deviations (sifted, found);
+    ",
 ];

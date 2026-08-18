@@ -190,7 +190,11 @@ async fn investigate(digger: &Digger, incident: &Incident) {
             &digger.store,
             &digger.metrics,
             told,
-            (Some(incident.id), Some(investigation)),
+            crate::scribe::About {
+                incident: Some(incident.id),
+                investigation: Some(investigation),
+                deviation: None,
+            },
         )
         .await;
         match answer {

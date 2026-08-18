@@ -17,11 +17,11 @@ use serde::Deserialize;
 use sre_domain::Minute;
 use sre_store::Store;
 
-use crate::config::{Corpus, Knowledge};
+use crate::config::{Corpus, Incidents, Knowledge};
 use crate::metrics::Metrics;
 use crate::reporter::{Reporter, single};
 use crate::session::{COOKIE, Doorman};
-use crate::view::{Card, Filed, Line, Paper, Question, Silence};
+use crate::view::{Card, Dropped, Filed, Line, Paper, Question, Silence};
 
 /// Стили: вшиты в бинарь, чтобы образ оставался одним файлом.
 const STYLE: &str = include_str!("../static/style.css");
@@ -34,6 +34,7 @@ pub struct Shared {
     doorman: Arc<Doorman>,
     knowledge: Knowledge,
     corpus: Corpus,
+    labels: Vec<String>,
     reporter: Option<Reporter>,
     version: &'static str,
 }
@@ -53,8 +54,18 @@ impl Shared {
             doorman: Arc::new(doorman),
             knowledge: knowledge.clone(),
             corpus: Corpus::default(),
+            labels: Vec::new(),
             reporter: None,
             version,
+        }
+    }
+
+    /// Та же обвязка, знающая, из каких меток брать имя сервиса.
+    #[must_use]
+    pub fn grouping(self, incidents: &Incidents) -> Self {
+        Self {
+            labels: incidents.service_labels.clone(),
+            ..self
         }
     }
 
@@ -100,6 +111,8 @@ pub fn routes(shared: Shared) -> Router {
         .route("/incident/{id}/merge", post(merge))
         .route("/incident/{id}/split", post(split))
         .route("/series", get(series))
+        .route("/sifted", get(sifted))
+        .route("/deviation/{id}/verdict", post(sift_verdict))
         .route("/api/corpus", get(corpus))
         .route("/reports", get(shelf))
         .route("/report/{kind}/{name}", get(page))
@@ -267,6 +280,67 @@ async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
 /// Сколько всего ждёт руки дежурного: заявки плюс непринятые черновики.
 async fn waits(shared: &Shared) -> usize {
     pending(shared).await.len() + shared.store.unsettled(100).await.unwrap_or_default().len()
+}
+
+#[derive(Template)]
+#[template(path = "sifted.html")]
+struct Silent {
+    sifted: Vec<Dropped>,
+    who: String,
+    waiting: usize,
+}
+
+/// Что отсев погасил за сутки.
+///
+/// Единственное место, где видно решения отсева: инцидента у них нет, в ленту
+/// они не попадают, и без этой страницы «модель сказала шум» никто никогда не
+/// проверит ([ADR-0019](../../../docs/adr/0019-muting-instead-of-per-service-thresholds.md)).
+async fn sifted(State(shared): State<Shared>, headers: HeaderMap) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let now = Minute::of(Utc::now());
+    let dropped = shared
+        .store
+        .sifts(now.back(24 * 60), now, 200)
+        .await
+        .unwrap_or_default();
+    render(&Silent {
+        sifted: dropped
+            .iter()
+            .map(|it| Dropped::of(it, &shared.labels))
+            .collect(),
+        who,
+        waiting: waits(&shared).await,
+    })
+}
+
+/// Оценка отсеянного: правильно погасили или зря.
+async fn sift_verdict(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(given): Form<Judgement>,
+) -> Response {
+    let Some(who) = guard(&shared, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let right = given.useful == "yes";
+    match shared
+        .store
+        .judge_sift(id, right, &who, Minute::of(Utc::now()))
+        .await
+    {
+        Ok(true) => {
+            if !right {
+                shared.metrics.misheard();
+            }
+            tracing::info!(deviation = id, right, who, "отсев оценён");
+            Redirect::to("/sifted").into_response()
+        }
+        Ok(false) => failure(StatusCode::NOT_FOUND, "отклонение не найдено"),
+        Err(broken) => failure(StatusCode::INTERNAL_SERVER_ERROR, &broken.to_string()),
+    }
 }
 
 #[derive(Debug, Deserialize)]

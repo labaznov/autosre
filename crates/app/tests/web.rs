@@ -1136,6 +1136,7 @@ async fn taught(agent: &Agent, incident: Option<i64>, ask: &str) -> i64 {
                 model: "поддельная".to_owned(),
                 incident,
                 investigation: None,
+                deviation: None,
                 system: "Ты — Auto SRE".to_owned(),
                 ask: ask.to_owned(),
                 answer: "{\"cause\":\"апстрим молчит\"}".to_owned(),
@@ -1243,4 +1244,97 @@ async fn keeps_the_numbers_the_corpus_is_learned_from() {
         .await
         .unwrap();
     assert!(body.contains("936500000"));
+}
+
+/// Отсеянное отклонение: то, о чём агент решил промолчать.
+async fn dropped(agent: &Agent) -> i64 {
+    use sre_domain::{Detector, Deviation, Kind, Minute, Stream, Thresholds};
+    let at = Minute::of(chrono::Utc::now()).back(30);
+    let stream = Stream::new("{host=\"node-01\",service=\"zabbix-proxy\"}");
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
+    let deviation = Deviation::new("logs", &stream, "15m", at, verdict);
+    agent.store.spot(&deviation, at).await.unwrap();
+    let id = agent
+        .store
+        .loose(10)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|(_, it)| it.stream == stream)
+        .expect("отклонение не найдено")
+        .0;
+    agent
+        .store
+        .sift(id, "ругается каждую ночь, привычный шум")
+        .await
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn shows_what_the_agent_kept_quiet_about() {
+    let agent = Agent::start().await;
+    dropped(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent.inside("/sifted", &cookie).await.text().await.unwrap();
+    assert!(page.contains("ругается каждую ночь"));
+}
+
+#[tokio::test]
+async fn says_the_sifter_kept_nothing_quiet() {
+    let agent = Agent::start().await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let page = agent.inside("/sifted", &cookie).await.text().await.unwrap();
+    assert!(page.contains("отсев ничего не гасил"));
+}
+
+#[tokio::test]
+async fn takes_the_word_that_the_agent_kept_quiet_in_vain() {
+    let agent = Agent::start().await;
+    let id = dropped(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    Agent::client()
+        .post(agent.at(&format!("/deviation/{id}/verdict")))
+        .header("cookie", &cookie)
+        .form(&[("useful", "no")])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    let now = sre_domain::Minute::of(chrono::Utc::now());
+    let sifted = agent.store.sifts(now.back(24 * 60), now, 10).await.unwrap();
+    assert_eq!(sifted[0].verdict, Some(false));
+}
+
+#[tokio::test]
+async fn counts_a_wrong_silence_apart_from_everything_else() {
+    let agent = Agent::start().await;
+    let id = dropped(&agent).await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    Agent::client()
+        .post(agent.at(&format!("/deviation/{id}/verdict")))
+        .header("cookie", &cookie)
+        .form(&[("useful", "no")])
+        .send()
+        .await
+        .expect("запрос не дошёл");
+    let page = agent.get("/metrics").await.text().await.unwrap();
+    assert!(page.contains("sre_sifted_wrong_total 1"));
+}
+
+#[tokio::test]
+async fn keeps_the_sifted_page_from_a_stranger() {
+    let agent = Agent::start().await;
+    assert_eq!(agent.get("/sifted").await.status(), 303);
 }

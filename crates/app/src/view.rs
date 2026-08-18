@@ -320,6 +320,41 @@ impl Line {
     }
 }
 
+/// Отсеянное отклонение в том виде, в каком его читает дежурный.
+pub struct Dropped {
+    pub id: i64,
+    pub service: String,
+    pub stream: String,
+    pub source: String,
+    pub horizon: String,
+    pub at: String,
+    pub value: String,
+    pub baseline: String,
+    pub because: String,
+    /// Уже оценено: `Some(true)` — отсеяли правильно.
+    pub verdict: Option<bool>,
+    pub judge: Option<String>,
+}
+
+impl Dropped {
+    #[must_use]
+    pub fn of(sifted: &sre_store::Sifted, labels: &[String]) -> Self {
+        Self {
+            id: sifted.id,
+            service: sre_domain::Service::of(&sifted.stream, labels).to_string(),
+            stream: sifted.stream.to_string(),
+            source: sifted.source.clone(),
+            horizon: sifted.horizon.clone(),
+            at: moment(sifted.at),
+            value: number(sifted.value),
+            baseline: number(sifted.baseline),
+            because: sifted.because.clone(),
+            verdict: sifted.verdict,
+            judge: sifted.judge.clone(),
+        }
+    }
+}
+
 /// Момент в виде, годном для показа: наружу из этого модуля.
 #[must_use]
 pub fn when(minute: Minute) -> String {

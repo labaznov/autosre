@@ -1887,3 +1887,86 @@ async fn counts_no_quiet_on_a_service_nobody_muted() {
             .unwrap()
     );
 }
+
+#[tokio::test]
+async fn hands_out_what_the_sifter_dropped() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store.sift(id, "ночная выгрузка").await.unwrap();
+    let sifted = base
+        .store
+        .sifts(at.back(60), at.back(-60), 10)
+        .await
+        .unwrap();
+    assert_eq!(sifted[0].because, "ночная выгрузка");
+}
+
+#[tokio::test]
+async fn leaves_the_incidents_out_of_the_sifted_list() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    incident_of(&base, &wifi(), "orders-api", at).await;
+    assert!(
+        base.store
+            .sifts(at.back(60), at.back(-60), 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_word_that_a_silence_was_wrong() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store.sift(id, "ночная выгрузка").await.unwrap();
+    base.store.judge_sift(id, false, "букин", at).await.unwrap();
+    let sifted = base
+        .store
+        .sifts(at.back(60), at.back(-60), 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        (sifted[0].verdict, sifted[0].judge.as_deref()),
+        (Some(false), Some("букин"))
+    );
+}
+
+#[tokio::test]
+async fn refuses_to_judge_a_deviation_nobody_sifted() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    assert!(!base.store.judge_sift(id, false, "букин", at).await.unwrap());
+}
+
+#[tokio::test]
+async fn brings_the_verdict_of_a_sift_into_the_corpus() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store.sift(id, "ночная выгрузка").await.unwrap();
+    base.store
+        .learn(
+            &sre_store::Lesson {
+                kind: "triage".to_owned(),
+                model: "поддельная".to_owned(),
+                incident: None,
+                investigation: None,
+                deviation: Some(id),
+                system: "Ты — Auto SRE".to_owned(),
+                ask: "Сервис: orders-api".to_owned(),
+                answer: "{\"worth\":false}".to_owned(),
+            },
+            at,
+        )
+        .await
+        .unwrap();
+    base.store.judge_sift(id, false, "букин", at).await.unwrap();
+    assert_eq!(
+        base.store.lessons(0, 10).await.unwrap()[0].verdict,
+        Some(false)
+    );
+}

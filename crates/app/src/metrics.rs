@@ -26,6 +26,7 @@ pub struct Metrics {
     hushed: AtomicU64,
     dodged: AtomicU64,
     lessons: AtomicU64,
+    misheard: AtomicU64,
     drafts: AtomicU64,
     inquiries: AtomicU64,
     answered: AtomicU64,
@@ -133,6 +134,7 @@ impl Metrics {
             hushed: AtomicU64::new(0),
             dodged: AtomicU64::new(0),
             lessons: AtomicU64::new(0),
+            misheard: AtomicU64::new(0),
             drafts: AtomicU64::new(0),
             inquiries: AtomicU64::new(0),
             answered: AtomicU64::new(0),
@@ -215,6 +217,15 @@ impl Metrics {
         self.dodged.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Отмечает отсев, признанный дежурным ошибочным.
+    ///
+    /// Это и есть ошибка первого рода агента: он замолчал о том, о чём должен
+    /// был сказать. Число маленькое и страшное — считать его надо отдельно от
+    /// всего остального.
+    pub fn misheard(&self) {
+        self.misheard.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Отмечает записанный урок: один заход в модель, ушедший в корпус.
     pub fn taught(&self) {
         self.lessons.fetch_add(1, Ordering::Relaxed);
@@ -289,6 +300,12 @@ impl Metrics {
             "sre_hushed_total",
             "Отклонения, приглушённые человеком",
             &self.hushed.load(Ordering::Relaxed).to_string(),
+        );
+        counter(
+            out,
+            "sre_sifted_wrong_total",
+            "Отсеянное, признанное дежурным нужным: агент промолчал зря",
+            &self.misheard.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,

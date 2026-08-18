@@ -78,71 +78,38 @@ async fn sort(
         let signature = pick(&groups, &deviation);
         let service = Service::of(&deviation.stream, &settings.service_labels);
 
-        // Приглушение проверяется до отсева: платить модели за то, что человек
-        // уже велел не показывать, незачем
-        // ([ADR-0019](../../../docs/adr/0019-muting-instead-of-per-service-thresholds.md)).
-        if let Ok(Some(mute)) = store
-            .muted(
-                &service,
-                &signature,
-                &deviation.stream,
-                Minute::of(Utc::now()),
-            )
-            .await
+        if hushed(
+            store,
+            metrics,
+            id,
+            (&service, &signature, &deviation.stream),
+        )
+        .await
         {
-            if let Err(failure) = store.hush_deviation(id, mute).await {
-                tracing::error!(%failure, "приглушённое отклонение не помечено");
-            }
-            metrics.hushed();
-            tracing::debug!(
-                service = service.as_str(),
-                signature = signature.as_str(),
-                mute,
-                "отклонение приглушено человеком и копится тихо"
-            );
             continue;
         }
 
-        // Отсев: стоит ли этим заниматься. Модель молчит — заводим инцидент
-        // всё равно: находка обязана дойти до дежурного даже без объяснения.
-        // Отсев спрашивают до того, как инцидент существует, поэтому заход
-        // придерживается и записывается ниже, когда номер станет известен:
-        // урок без инцидента нечем разметить, а метка отсева — самая ценная.
-        let (answer, told) = crate::scribe::watch(model.triage(&prompt::about(
-            &deviation,
-            service.as_str(),
-            &groups,
-        )))
-        .await;
-        let because = match answer {
-            Ok(triage) if !triage.worth => {
-                metrics.sifted();
-                tracing::info!(
-                    service = service.as_str(),
-                    because = triage.because,
-                    "отклонение отсеяно как привычный шум"
-                );
-                if let Err(failure) = store.sift(id, &triage.because).await {
-                    tracing::error!(%failure, "отсев не записан");
-                }
-                // Отсеянное тоже урок, и метка у него есть: модель сказала
-                // «шум», и дальше видно, была ли она права.
-                crate::scribe::keep(store, metrics, told, (None, None)).await;
-                continue;
-            }
-            Ok(triage) => triage.because,
-            Err(failure) => {
-                metrics.failure();
-                tracing::warn!(%failure, "отсев не удался, инцидент заводится без него");
-                "разбор отсева не состоялся: модель недоступна".to_owned()
-            }
+        let Some((because, told)) =
+            sifter(store, metrics, model, (id, &deviation, &service, &groups)).await
+        else {
+            continue;
         };
 
         let attached = store
             .attach(id, &service, &signature, &deviation, &because)
             .await;
         if let Ok((incident, _)) = attached {
-            crate::scribe::keep(store, metrics, told, (Some(incident), None)).await;
+            crate::scribe::keep(
+                store,
+                metrics,
+                told,
+                crate::scribe::About {
+                    incident: Some(incident),
+                    deviation: Some(id),
+                    ..crate::scribe::About::default()
+                },
+            )
+            .await;
         }
         match attached {
             Ok((incident, fresh)) if fresh => {
@@ -164,6 +131,92 @@ async fn sort(
             }
         }
     }
+}
+
+/// Отсев: стоит ли этим заниматься.
+///
+/// Пусто — отклонение отсеяно как привычный шум. Модель молчит — подозрение
+/// идёт дальше без объяснения: находка обязана дойти до дежурного даже тогда,
+/// когда объяснить её некому.
+async fn sifter(
+    store: &Store,
+    metrics: &Metrics,
+    model: &Model,
+    about: (i64, &Deviation, &Service, &[sre_domain::Group]),
+) -> Option<(String, Vec<sre_model::Told>)> {
+    let (id, deviation, service, groups) = about;
+    // Отсев спрашивают до того, как инцидент существует, поэтому заход
+    // придерживается и записывается позже, когда номер станет известен: урок
+    // без метки нечем разметить, а метка отсева — самая ценная.
+    let (answer, told) =
+        crate::scribe::watch(model.triage(&prompt::about(deviation, service.as_str(), groups)))
+            .await;
+    match answer {
+        Ok(triage) if !triage.worth => {
+            metrics.sifted();
+            tracing::info!(
+                service = service.as_str(),
+                because = triage.because,
+                "отклонение отсеяно как привычный шум"
+            );
+            if let Err(failure) = store.sift(id, &triage.because).await {
+                tracing::error!(%failure, "отсев не записан");
+            }
+            // Отсеянное тоже урок, и метку ему поставит дежурный на странице
+            // отсеянного: без неё отрицательных примеров у корпуса нет.
+            crate::scribe::keep(
+                store,
+                metrics,
+                told,
+                crate::scribe::About {
+                    deviation: Some(id),
+                    ..crate::scribe::About::default()
+                },
+            )
+            .await;
+            None
+        }
+        Ok(triage) => Some((triage.because, told)),
+        Err(failure) => {
+            metrics.failure();
+            tracing::warn!(%failure, "отсев не удался, инцидент заводится без него");
+            Some((
+                "разбор отсева не состоялся: модель недоступна".to_owned(),
+                told,
+            ))
+        }
+    }
+}
+
+/// Приглушено ли человеком. Приглушённое копится тихо и никого не будит.
+///
+/// Проверяется до отсева: платить модели за то, что человек уже велел не
+/// показывать, незачем
+/// ([ADR-0019](../../../docs/adr/0019-muting-instead-of-per-service-thresholds.md)).
+async fn hushed(
+    store: &Store,
+    metrics: &Metrics,
+    deviation: i64,
+    about: (&Service, &Signature, &sre_domain::Stream),
+) -> bool {
+    let (service, signature, stream) = about;
+    let Ok(Some(mute)) = store
+        .muted(service, signature, stream, Minute::of(Utc::now()))
+        .await
+    else {
+        return false;
+    };
+    if let Err(failure) = store.hush_deviation(deviation, mute).await {
+        tracing::error!(%failure, "приглушённое отклонение не помечено");
+    }
+    metrics.hushed();
+    tracing::debug!(
+        service = service.as_str(),
+        signature = signature.as_str(),
+        mute,
+        "отклонение приглушено человеком и копится тихо"
+    );
+    true
 }
 
 /// Заведённый инцидент: связи, числа и подозрительная тишина рядом.
