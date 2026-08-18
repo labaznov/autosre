@@ -132,6 +132,8 @@ pub struct Learned {
     pub kind: String,
     pub model: String,
     pub incident: Option<i64>,
+    /// Отклонение, о котором спрашивали отсев.
+    pub deviation: Option<i64>,
     pub system: String,
     pub ask: String,
     pub answer: String,
@@ -1163,7 +1165,7 @@ impl Store {
             let mut query = db.prepare(
                 "SELECT l.id, l.at, l.kind, l.model, l.incident, l.system, l.ask, l.answer,
                         n.service, n.signature,
-                        COALESCE(n.verdict, d.verdict), n.severity, n.state
+                        COALESCE(n.verdict, d.verdict), n.severity, n.state, l.deviation
                    FROM lessons l
                    LEFT JOIN incidents n ON n.id = l.incident
                    LEFT JOIN deviations d ON d.id = l.deviation
@@ -1184,6 +1186,7 @@ impl Store {
                     verdict: row.get::<_, Option<i64>>(10)?.map(|it| it == 1),
                     severity: row.get(11)?,
                     state: row.get(12)?,
+                    deviation: row.get(13)?,
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)

@@ -424,6 +424,7 @@ fn line(lesson: &sre_store::Learned, hide: bool) -> String {
             {"role": "assistant", "content": text(&lesson.answer)},
         ],
         "incident": lesson.incident,
+        "deviation": lesson.deviation,
         "service": lesson.service,
         "signature": lesson.signature,
         "verdict": lesson.verdict,
