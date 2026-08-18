@@ -105,12 +105,16 @@ async fn sort(
 
         // Отсев: стоит ли этим заниматься. Модель молчит — заводим инцидент
         // всё равно: находка обязана дойти до дежурного даже без объяснения.
-        // Отсев спрашивают до того, как инцидент существует, поэтому урок
-        // помечать нечем: связь поставит расследование, а метку — дежурный.
-        let because = match model
-            .triage(&prompt::about(&deviation, service.as_str(), &groups))
-            .await
-        {
+        // Отсев спрашивают до того, как инцидент существует, поэтому заход
+        // придерживается и записывается ниже, когда номер станет известен:
+        // урок без инцидента нечем разметить, а метка отсева — самая ценная.
+        let (answer, told) = crate::scribe::watch(model.triage(&prompt::about(
+            &deviation,
+            service.as_str(),
+            &groups,
+        )))
+        .await;
+        let because = match answer {
             Ok(triage) if !triage.worth => {
                 metrics.sifted();
                 tracing::info!(
@@ -121,6 +125,9 @@ async fn sort(
                 if let Err(failure) = store.sift(id, &triage.because).await {
                     tracing::error!(%failure, "отсев не записан");
                 }
+                // Отсеянное тоже урок, и метка у него есть: модель сказала
+                // «шум», и дальше видно, была ли она права.
+                crate::scribe::keep(store, metrics, told, (None, None)).await;
                 continue;
             }
             Ok(triage) => triage.because,
@@ -131,10 +138,13 @@ async fn sort(
             }
         };
 
-        match store
+        let attached = store
             .attach(id, &service, &signature, &deviation, &because)
-            .await
-        {
+            .await;
+        if let Ok((incident, _)) = attached {
+            crate::scribe::keep(store, metrics, told, (Some(incident), None)).await;
+        }
+        match attached {
             Ok((incident, fresh)) if fresh => {
                 opened(
                     store,

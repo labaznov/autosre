@@ -111,7 +111,7 @@ async fn serve() -> Result<(), Failure> {
             raw = config.file.corpus.raw,
             "сбор живых данных включён: каждый заход в модель ложится в корпус"
         );
-        talker.recording(Arc::new(scribe::Scribe::new(&store, &metrics)))
+        talker.recording(Arc::new(scribe::Scribe))
     } else {
         talker
     });

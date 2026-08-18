@@ -185,12 +185,15 @@ async fn investigate(digger: &Digger, incident: &Incident) {
 
     for step in 0..=steps {
         let asked = prompt::dossier(&head, &dossier);
-        let told = crate::scribe::about(
-            Some(incident.id),
-            Some(investigation),
-            digger.model.conclude(&skill.body, &asked),
-        );
-        match told.await {
+        let (answer, told) = crate::scribe::watch(digger.model.conclude(&skill.body, &asked)).await;
+        crate::scribe::keep(
+            &digger.store,
+            &digger.metrics,
+            told,
+            (Some(incident.id), Some(investigation)),
+        )
+        .await;
+        match answer {
             Ok(conclusion) => {
                 let need = conclusion.need.clone().unwrap_or_default();
                 if need == "ask" && inquire(digger, incident, investigation, &conclusion).await {

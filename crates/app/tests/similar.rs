@@ -73,11 +73,8 @@ async fn answer(State(talk): State<Talk>, body: String) -> String {
 
 /// Клиент модели, складывающий каждый заход в корпус: так поднимает его агент
 /// со включённым сбором живых данных.
-fn recording(model: Model, store: &Store) -> Model {
-    model.recording(Arc::new(sre_app::scribe::Scribe::new(
-        store,
-        &Arc::new(Metrics::new("тест")),
-    )))
+fn recording(model: Model) -> Model {
+    model.recording(Arc::new(sre_app::scribe::Scribe))
 }
 
 struct Stand {
@@ -134,7 +131,6 @@ impl Stand {
                 timeout: Duration::from_secs(5),
             })
             .expect("клиент не собрался"),
-            &store,
         ));
         let sources: Vec<Arc<dyn Source>> = vec![Arc::new(Talker)];
         dig(Digger::new(

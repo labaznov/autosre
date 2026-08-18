@@ -1222,3 +1222,25 @@ async fn keeps_the_corpus_from_a_stranger() {
     let agent = Agent::start().await;
     assert_eq!(agent.get("/api/corpus").await.status(), 303);
 }
+
+#[tokio::test]
+async fn keeps_the_numbers_the_corpus_is_learned_from() {
+    let agent = Agent::start().await;
+    taught(
+        &agent,
+        None,
+        "Значение за окно: 936500000, обычно: 1371500000",
+    )
+    .await;
+    let cookie = agent
+        .enter("duty", SECRET)
+        .await
+        .expect("вход не удался");
+    let body = agent
+        .inside("/api/corpus", &cookie)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("936500000"));
+}

@@ -334,7 +334,7 @@ async fn corpus(
 fn line(lesson: &sre_store::Learned, hide: bool) -> String {
     let text = |it: &str| {
         if hide {
-            sre_domain::signature::mask(it)
+            sre_domain::signature::hide(it)
         } else {
             it.to_owned()
         }

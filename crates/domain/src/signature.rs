@@ -95,6 +95,34 @@ pub fn mask(text: &str) -> String {
     NUMBER.replace_all(&masked, "<n>").into_owned()
 }
 
+/// Прячет то, что указывает на конкретную машину и человека, — и только это.
+///
+/// Не то же самое, что [`mask`], и разница принципиальная. Для сигнатуры число
+/// — шум: «таймаут 30s» и «таймаут 45s» об одном и том же. Для обучения число
+/// — единственный сигнал: отсев решает по величинам, и пример, в котором вместо
+/// «936 500 000 против 1 371 500 000» стоит «столько-то против столько-то»,
+/// не учит ничему ([ADR-0027](../../../docs/adr/0027-live-corpus.md)).
+///
+/// Поэтому здесь гасятся адреса, идентификаторы и длинные шестнадцатеричные
+/// токены — то, по чему узнают хозяйство, — а числа и пути остаются: без них
+/// не понять ни величины, ни какой раздел кончился.
+#[must_use]
+pub fn hide(text: &str) -> String {
+    let hidden = UUID.replace_all(text, "<uuid>");
+    let hidden = ADDRESS.replace_all(&hidden, "<addr>");
+    HEX.replace_all(&hidden, |caught: &regex::Captures| {
+        // Длинное число — это число, а не идентификатор. Токеном его делает
+        // буква: `deadbeef` прячем, `936500000` оставляем.
+        let token = &caught[0];
+        if token.chars().any(|it| it.is_ascii_alphabetic()) {
+            "<hex>".to_owned()
+        } else {
+            token.to_owned()
+        }
+    })
+    .into_owned()
+}
+
 /// Группа сообщений с одной сигнатурой: счётчик и живой образец.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Group {

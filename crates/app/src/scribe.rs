@@ -8,12 +8,14 @@
 //! с агентом, и корпус, восстановленный по нынешним шаблонам из прошлогодних
 //! данных, учит модель тому, чего никогда не происходило.
 //!
-//! Метку к примеру ставит не агент, а дежурный — своей оценкой инцидента.
-//! Поэтому урок держит номер инцидента: без него это переписка с моделью, а с
-//! ним — пример с ответом.
+//! Метку к примеру ставит дежурный своей оценкой инцидента, поэтому урок
+//! обязан знать инцидент. Знает его не модель и не писарь, а тот, кто
+//! спрашивал, — и часто узнаёт **после** ответа: отсев зовут раньше, чем
+//! инцидент заведён. Отсюда порядок: заходы копятся, а записываются, когда
+//! номер известен.
 
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::Mutex;
 
 use chrono::Utc;
 use sre_domain::Minute;
@@ -23,59 +25,64 @@ use sre_store::{Lesson, Store};
 use crate::metrics::Metrics;
 
 tokio::task_local! {
-    /// Инцидент и расследование, ради которых сейчас спрашивают модель.
-    ///
-    /// Модель про них не знает и знать не должна: она отдаёт то, что отправила.
-    /// Связь ставит тот, кто спрашивает, и здесь она живёт ровно на время
-    /// одного захода.
-    static ABOUT: (Option<i64>, Option<i64>);
+    /// Заходы в модель, сделанные внутри одной работы.
+    static TOLD: Mutex<Vec<Told>>;
 }
 
-/// Выполняет работу, пометив её инцидентом и расследованием.
-pub async fn about<T>(
-    incident: Option<i64>,
-    investigation: Option<i64>,
-    work: impl Future<Output = T>,
-) -> T {
-    ABOUT.scope((incident, investigation), work).await
+/// Выполняет работу, запоминая всё, что она сказала модели.
+///
+/// Ответ работы отдаётся как есть: сбор данных не имеет права ни менять его,
+/// ни задерживать.
+pub async fn watch<T>(work: impl Future<Output = T>) -> (T, Vec<Told>) {
+    let slot = Mutex::new(Vec::new());
+    TOLD.scope(slot, async {
+        let done = work.await;
+        let told = TOLD.with(|it| std::mem::take(&mut *guard(it)));
+        (done, told)
+    })
+    .await
 }
 
-/// Писарь: складывает заходы в модель в базу.
-pub struct Scribe {
-    store: Store,
-    metrics: Arc<Metrics>,
-}
-
-impl Scribe {
-    #[must_use]
-    pub fn new(store: &Store, metrics: &Arc<Metrics>) -> Self {
-        Self {
-            store: store.clone(),
-            metrics: Arc::clone(metrics),
+/// Складывает заходы в корпус, пометив их инцидентом и расследованием.
+pub async fn keep(
+    store: &Store,
+    metrics: &Metrics,
+    told: Vec<Told>,
+    about: (Option<i64>, Option<i64>),
+) {
+    for one in told {
+        let lesson = Lesson {
+            kind: one.kind.to_owned(),
+            model: one.model,
+            incident: about.0,
+            investigation: about.1,
+            system: one.system,
+            ask: one.ask,
+            answer: one.answer,
+        };
+        match store.learn(&lesson, Minute::of(Utc::now())).await {
+            Ok(_) => metrics.taught(),
+            Err(failure) => tracing::warn!(%failure, "урок не записан"),
         }
     }
 }
 
+/// Писарь: перехватывает заходы в модель и складывает их в текущую работу.
+///
+/// Ничего не хранит сам: где записывать и под каким номером — не его дело.
+pub struct Scribe;
+
 impl Ledger for Scribe {
     fn keep(&self, told: Told) {
-        let (incident, investigation) = ABOUT.try_with(|it| *it).unwrap_or((None, None));
-        let (store, metrics) = (self.store.clone(), Arc::clone(&self.metrics));
-        // Запись урока не должна задерживать разбор: она не нужна ни для
-        // вывода, ни для карточки, и падать из-за неё тем более незачем.
-        tokio::spawn(async move {
-            let lesson = Lesson {
-                kind: told.kind.to_owned(),
-                model: told.model,
-                incident,
-                investigation,
-                system: told.system,
-                ask: told.ask,
-                answer: told.answer,
-            };
-            match store.learn(&lesson, Minute::of(Utc::now())).await {
-                Ok(_) => metrics.taught(),
-                Err(failure) => tracing::warn!(%failure, "урок не записан"),
-            }
-        });
+        if TOLD.try_with(|slot| guard(slot).push(told)).is_err() {
+            tracing::debug!("заход в модель вне наблюдаемой работы, в корпус не попал");
+        }
     }
+}
+
+/// Берёт список заходов, восстанавливая его после паники другого потока:
+/// терять корпус из-за одного сбоя незачем.
+fn guard(slot: &Mutex<Vec<Told>>) -> std::sync::MutexGuard<'_, Vec<Told>> {
+    slot.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
