@@ -3,3 +3,4 @@
 .env
 .claude/
 /testlab/knowledge/
+__pycache__/
