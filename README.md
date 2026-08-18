@@ -1,5 +1,24 @@
 # sreagent
 
+> **In English.** A second diagnostic loop for on-call SRE. The agent watches
+> VictoriaLogs and VictoriaMetrics, finds deviations with a robust detector,
+> sifts routine noise with a cheap model call, investigates what survives using
+> human-written skills, and shows the on-call engineer a write-up: what
+> happened, what it resembles among known cases, where to look next.
+>
+> **It never fixes anything and never touches your hosts.** When data is out of
+> reach it asks a human to run a read-only command and waits for the answer.
+>
+> Rust 2024, ten crates, 417 tests, `clippy::pedantic` clean. Works end to end
+> on the bundled test lab; **not yet calibrated on production data**. Try it
+> with `cd testlab && make up && make agent`, then open
+> `http://127.0.0.1:8096/` and log in as `duty` / `sreagent-lab`.
+>
+> Everything else — code comments, docs, and the web UI — is in Russian, and
+> that is deliberate: this is a tool for a Russian-speaking on-call team.
+> Design rationale lives in [`docs/adr/`](docs/adr/README.md), 27 decisions
+> with the alternatives that were rejected and why.
+
 Второй контур диагностики: агент смотрит логи и метрики, замечает отклонения,
 проводит первичное расследование и показывает дежурному SRE разбор — что
 случилось, на что это похоже из уже известного, куда смотреть дальше.

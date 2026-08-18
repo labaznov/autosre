@@ -1,0 +1,34 @@
+# Проверки, без которых изменение не попадает в main.
+#
+# Ровно те же три команды, что и на машине разработчика
+# ([CONTRIBUTING.md](../CONTRIBUTING.md)): формат, придирчивый clippy и тесты.
+# Предупреждение считается отказом — в этом проекте `clippy::pedantic` молчит,
+# и держаться это должно на машине, а не на честном слове.
+
+on:
+  push:
+    - workflows: [check]
+      filter:
+        branches: ["main"]
+  pull_request:
+    - workflows: [check]
+      filter:
+        target_branches: ["main"]
+
+workflows:
+  check:
+    tasks:
+      - name: rust
+        cubes:
+          - name: fmt
+            image: docker.io/library/rust:1.97
+            script:
+              - cargo fmt --check
+          - name: clippy
+            image: docker.io/library/rust:1.97
+            script:
+              - cargo clippy --all-targets -- -D warnings
+          - name: test
+            image: docker.io/library/rust:1.97
+            script:
+              - cargo test

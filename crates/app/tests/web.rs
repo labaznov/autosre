@@ -515,10 +515,7 @@ async fn asked(agent: &Agent) -> (i64, i64) {
 async fn shows_the_command_on_the_card() {
     let agent = Agent::start().await;
     let (incident, _) = asked(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside(&format!("/incident/{incident}"), &cookie)
         .await
@@ -532,10 +529,7 @@ async fn shows_the_command_on_the_card() {
 async fn collects_what_waits_for_the_duty_engineer() {
     let agent = Agent::start().await;
     asked(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside("/waiting", &cookie)
         .await
@@ -548,10 +542,7 @@ async fn collects_what_waits_for_the_duty_engineer() {
 #[tokio::test]
 async fn says_there_is_nothing_to_wait_for() {
     let agent = Agent::start().await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside("/waiting", &cookie)
         .await
@@ -571,10 +562,7 @@ async fn keeps_the_waiting_list_from_a_stranger() {
 async fn counts_the_waiting_inquiries_in_the_header() {
     let agent = Agent::start().await;
     asked(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent.inside("/", &cookie).await.text().await.unwrap();
     assert!(page.contains("ждёт вас · 1"));
 }
@@ -583,10 +571,7 @@ async fn counts_the_waiting_inquiries_in_the_header() {
 async fn takes_the_answer_of_the_duty_engineer() {
     let agent = Agent::start().await;
     let (incident, inquiry) = asked(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     Agent::client()
         .post(agent.at(&format!("/inquiry/{inquiry}/answer")))
         .header("cookie", &cookie)
@@ -604,10 +589,7 @@ async fn takes_the_answer_of_the_duty_engineer() {
 async fn drops_an_inquiry_answered_with_nothing() {
     let agent = Agent::start().await;
     let (_, inquiry) = asked(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     Agent::client()
         .post(agent.at(&format!("/inquiry/{inquiry}/answer")))
         .header("cookie", &cookie)
@@ -670,10 +652,7 @@ async fn drafted(agent: &Agent) -> (i64, i64) {
 async fn shows_a_draft_on_the_card() {
     let agent = Agent::start().await;
     let (incident, _) = drafted(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside(&format!("/incident/{incident}"), &cookie)
         .await
@@ -687,10 +666,7 @@ async fn shows_a_draft_on_the_card() {
 async fn counts_an_unsettled_draft_among_what_waits() {
     let agent = Agent::start().await;
     drafted(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent.inside("/", &cookie).await.text().await.unwrap();
     assert!(page.contains("ждёт вас · 1"));
 }
@@ -699,10 +675,7 @@ async fn counts_an_unsettled_draft_among_what_waits() {
 async fn moves_an_accepted_draft_into_the_knowledge_base() {
     let agent = Agent::start().await;
     let (_, draft) = drafted(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.settle(draft, "yes", &cookie).await;
     assert!(
         agent
@@ -717,10 +690,7 @@ async fn moves_an_accepted_draft_into_the_knowledge_base() {
 async fn puts_an_accepted_draft_into_the_search_index() {
     let agent = Agent::start().await;
     let (_, draft) = drafted(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.settle(draft, "yes", &cookie).await;
     assert_eq!(agent.store.notes().await.unwrap(), 1);
 }
@@ -729,10 +699,7 @@ async fn puts_an_accepted_draft_into_the_search_index() {
 async fn keeps_a_rejected_draft_out_of_the_knowledge_base() {
     let agent = Agent::start().await;
     let (_, draft) = drafted(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.settle(draft, "no", &cookie).await;
     assert_eq!(agent.store.notes().await.unwrap(), 0);
 }
@@ -741,10 +708,7 @@ async fn keeps_a_rejected_draft_out_of_the_knowledge_base() {
 async fn names_the_one_who_settled_a_draft() {
     let agent = Agent::start().await;
     let (incident, draft) = drafted(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.settle(draft, "no", &cookie).await;
     assert_eq!(
         agent.store.drafts(incident).await.unwrap()[0]
@@ -758,10 +722,7 @@ async fn names_the_one_who_settled_a_draft() {
 async fn settles_a_draft_once() {
     let agent = Agent::start().await;
     let (_, draft) = drafted(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.settle(draft, "yes", &cookie).await;
     assert!(agent.store.unsettled(10).await.unwrap().is_empty());
 }
@@ -770,10 +731,7 @@ async fn settles_a_draft_once() {
 async fn hushes_a_pair_the_duty_engineer_is_tired_of() {
     let agent = Agent::start().await;
     let id = incident(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.mute(id, "7", &cookie).await;
     let now = sre_domain::Minute::at(1_786_968_720);
     assert_eq!(agent.store.mutes(now, 10).await.unwrap().len(), 1);
@@ -783,10 +741,7 @@ async fn hushes_a_pair_the_duty_engineer_is_tired_of() {
 async fn refuses_to_mute_forever() {
     let agent = Agent::start().await;
     let id = incident(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.mute(id, "100000", &cookie).await;
     let now = sre_domain::Minute::at(1_786_968_720);
     let until = agent.store.mutes(now, 10).await.unwrap()[0].until;
@@ -797,10 +752,7 @@ async fn refuses_to_mute_forever() {
 async fn shows_the_muted_pairs_on_their_own_page() {
     let agent = Agent::start().await;
     let id = incident(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.mute(id, "7", &cookie).await;
     let page = agent.inside("/mutes", &cookie).await.text().await.unwrap();
     assert!(page.contains("orders-api"));
@@ -809,10 +761,7 @@ async fn shows_the_muted_pairs_on_their_own_page() {
 #[tokio::test]
 async fn says_there_is_nothing_muted() {
     let agent = Agent::start().await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent.inside("/mutes", &cookie).await.text().await.unwrap();
     assert!(page.contains("Приглушений нет"));
 }
@@ -821,10 +770,7 @@ async fn says_there_is_nothing_muted() {
 async fn lifts_a_mute_before_its_time() {
     let agent = Agent::start().await;
     let id = incident(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.mute(id, "7", &cookie).await;
     let now = sre_domain::Minute::at(1_786_968_720);
     let mute = agent.store.mutes(now, 10).await.unwrap()[0].id;
@@ -855,10 +801,7 @@ async fn merges_two_incidents_at_the_word_of_the_duty_engineer() {
     let agent = Agent::start().await;
     let first = incident(&agent).await;
     let second = other(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     Agent::client()
         .post(agent.at(&format!("/incident/{first}/merge")))
         .header("cookie", &cookie)
@@ -874,10 +817,7 @@ async fn shows_what_an_incident_was_built_from() {
     let agent = Agent::start().await;
     let first = incident(&agent).await;
     let second = other(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     Agent::client()
         .post(agent.at(&format!("/incident/{first}/merge")))
         .header("cookie", &cookie)
@@ -899,10 +839,7 @@ async fn takes_a_merged_incident_off_the_feed() {
     let agent = Agent::start().await;
     let first = incident(&agent).await;
     let second = other(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     Agent::client()
         .post(agent.at(&format!("/incident/{first}/merge")))
         .header("cookie", &cookie)
@@ -945,10 +882,7 @@ async fn shows_the_shelf_of_reports() {
         )
         .await
         .unwrap();
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside("/reports", &cookie)
         .await
@@ -976,10 +910,7 @@ async fn opens_a_report() {
         )
         .await
         .unwrap();
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside("/report/daily/2026-08-16", &cookie)
         .await
@@ -992,10 +923,7 @@ async fn opens_a_report() {
 #[tokio::test]
 async fn says_there_are_no_reports_yet() {
     let agent = Agent::start().await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside("/reports", &cookie)
         .await
@@ -1025,10 +953,7 @@ async fn shows_what_the_agent_watches() {
         )
         .await
         .unwrap();
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent.inside("/series", &cookie).await.text().await.unwrap();
     assert!(page.contains("orders-api"));
 }
@@ -1036,10 +961,7 @@ async fn shows_what_the_agent_watches() {
 #[tokio::test]
 async fn says_the_series_are_empty_before_the_first_bucket() {
     let agent = Agent::start().await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent.inside("/series", &cookie).await.text().await.unwrap();
     assert!(page.contains("Ряд пуст"));
 }
@@ -1096,10 +1018,7 @@ async fn drops_a_measurement_of_a_clock_that_went_backwards() {
 async fn shows_how_bad_it_is_on_the_card() {
     let agent = Agent::start().await;
     let id = concluded(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside(&format!("/incident/{id}"), &cookie)
         .await
@@ -1113,10 +1032,7 @@ async fn shows_how_bad_it_is_on_the_card() {
 async fn says_nothing_about_severity_before_a_conclusion() {
     let agent = Agent::start().await;
     let id = incident(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent
         .inside(&format!("/incident/{id}"), &cookie)
         .await
@@ -1151,10 +1067,7 @@ async fn taught(agent: &Agent, incident: Option<i64>, ask: &str) -> i64 {
 async fn gives_out_the_corpus_line_by_line() {
     let agent = Agent::start().await;
     taught(&agent, None, "Сервис: orders-api").await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let body = agent
         .inside("/api/corpus", &cookie)
         .await
@@ -1168,10 +1081,7 @@ async fn gives_out_the_corpus_line_by_line() {
 async fn masks_the_addresses_of_the_corpus() {
     let agent = Agent::start().await;
     taught(&agent, None, "upstream 192.0.2.19 timed out").await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let body = agent
         .inside("/api/corpus", &cookie)
         .await
@@ -1186,10 +1096,7 @@ async fn hands_the_verdict_of_the_duty_engineer_with_the_lesson() {
     let agent = Agent::start().await;
     let id = incident(&agent).await;
     taught(&agent, Some(id), "Сервис: orders-api").await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.judge(id, "yes", &cookie).await;
     let body = agent
         .inside("/api/corpus", &cookie)
@@ -1205,10 +1112,7 @@ async fn gives_out_the_corpus_in_portions() {
     let agent = Agent::start().await;
     let first = taught(&agent, None, "первый").await;
     taught(&agent, None, "второй").await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let body = agent
         .inside(&format!("/api/corpus?after={first}"), &cookie)
         .await
@@ -1233,10 +1137,7 @@ async fn keeps_the_numbers_the_corpus_is_learned_from() {
         "Значение за окно: 936500000, обычно: 1371500000",
     )
     .await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let body = agent
         .inside("/api/corpus", &cookie)
         .await
@@ -1275,10 +1176,7 @@ async fn dropped(agent: &Agent) -> i64 {
 async fn shows_what_the_agent_kept_quiet_about() {
     let agent = Agent::start().await;
     dropped(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent.inside("/sifted", &cookie).await.text().await.unwrap();
     assert!(page.contains("ругается каждую ночь"));
 }
@@ -1286,10 +1184,7 @@ async fn shows_what_the_agent_kept_quiet_about() {
 #[tokio::test]
 async fn says_the_sifter_kept_nothing_quiet() {
     let agent = Agent::start().await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     let page = agent.inside("/sifted", &cookie).await.text().await.unwrap();
     assert!(page.contains("отсев ничего не гасил"));
 }
@@ -1298,10 +1193,7 @@ async fn says_the_sifter_kept_nothing_quiet() {
 async fn takes_the_word_that_the_agent_kept_quiet_in_vain() {
     let agent = Agent::start().await;
     let id = dropped(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     Agent::client()
         .post(agent.at(&format!("/deviation/{id}/verdict")))
         .header("cookie", &cookie)
@@ -1318,10 +1210,7 @@ async fn takes_the_word_that_the_agent_kept_quiet_in_vain() {
 async fn counts_a_wrong_silence_apart_from_everything_else() {
     let agent = Agent::start().await;
     let id = dropped(&agent).await;
-    let cookie = agent
-        .enter("duty", SECRET)
-        .await
-        .expect("вход не удался");
+    let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     Agent::client()
         .post(agent.at(&format!("/deviation/{id}/verdict")))
         .header("cookie", &cookie)
