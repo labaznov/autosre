@@ -20,13 +20,17 @@ workflows:
     tasks:
       - name: rust
         cubes:
+          # Образ rust:N собран по минимальному профилю: компилятор есть, а
+          # rustfmt и clippy — нет, их надо доставить.
           - name: fmt
             image: docker.io/library/rust:1.97
             script:
+              - rustup component add rustfmt
               - cargo fmt --check
           - name: clippy
             image: docker.io/library/rust:1.97
             script:
+              - rustup component add clippy
               - cargo clippy --all-targets -- -D warnings
           - name: test
             image: docker.io/library/rust:1.97

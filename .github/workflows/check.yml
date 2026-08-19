@@ -23,6 +23,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Образ rust:N собран по минимальному профилю: компилятор есть, а
+      # rustfmt и clippy — нет. Ставим их явно, иначе проверки падают на
+      # «'cargo-fmt' is not installed for the toolchain».
+      - name: Доставить rustfmt и clippy
+        run: rustup component add rustfmt clippy
+
       - name: Формат
         run: cargo fmt --check
 
