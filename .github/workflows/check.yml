@@ -1,0 +1,33 @@
+# Проверки, без которых изменение не попадает в main.
+#
+# Те же три команды, что и на машине разработчика, и те же, что в
+# .sourcecraft/ci.yaml: репозиторий живёт на двух хостингах, и расходиться
+# проверки не должны.
+#
+# Образ прибит к версии из Cargo.toml (rust-version = 1.97): в проекте
+# издание 2024, и на более старом компиляторе он просто не соберётся.
+
+name: Проверки
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Формат, clippy, тесты
+    runs-on: ubuntu-latest
+    container: rust:1.97
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Формат
+        run: cargo fmt --check
+
+      - name: Clippy без предупреждений
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Тесты
+        run: cargo test
