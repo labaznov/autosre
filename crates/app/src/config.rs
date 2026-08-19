@@ -65,9 +65,9 @@ impl Secrets {
     /// [`ConfigError::Missing`] на первом же отсутствующем ключе.
     pub fn read(env: &dyn Env) -> Result<Self, ConfigError> {
         Ok(Self {
-            model: required(env, "SREAGENT_MODEL_KEY")?,
-            session: required(env, "SREAGENT_SESSION_KEY")?,
-            logs_password: env.var("SREAGENT_LOGS_PASSWORD").unwrap_or_default(),
+            model: required(env, "AUTOSRE_MODEL_KEY")?,
+            session: required(env, "AUTOSRE_SESSION_KEY")?,
+            logs_password: env.var("AUTOSRE_LOGS_PASSWORD").unwrap_or_default(),
         })
     }
 }
@@ -605,7 +605,7 @@ fn default_bind() -> SocketAddr {
         .expect("адрес по умолчанию корректен")
 }
 fn default_database() -> PathBuf {
-    PathBuf::from("/opt/data/sreagent/sre.db")
+    PathBuf::from("/opt/data/autosre/autosre.db")
 }
 fn default_error_pattern() -> String {
     "i(error*) OR i(exception*) OR i(panic*) OR i(fatal*) OR i(traceback*)".to_owned()
@@ -673,13 +673,13 @@ fn default_drift() -> f64 {
     0.15
 }
 fn default_notes() -> PathBuf {
-    PathBuf::from("/opt/data/sreagent/knowledge/notes")
+    PathBuf::from("/opt/data/autosre/knowledge/notes")
 }
 fn default_drafts() -> PathBuf {
-    PathBuf::from("/opt/data/sreagent/knowledge/drafts")
+    PathBuf::from("/opt/data/autosre/knowledge/drafts")
 }
 fn default_reports() -> PathBuf {
-    PathBuf::from("/opt/data/sreagent/knowledge/reports")
+    PathBuf::from("/opt/data/autosre/knowledge/reports")
 }
 fn default_worth() -> f64 {
     0.5
@@ -691,7 +691,7 @@ fn default_recall() -> usize {
     3
 }
 fn default_skills() -> PathBuf {
-    PathBuf::from("/opt/data/sreagent/knowledge/skills")
+    PathBuf::from("/opt/data/autosre/knowledge/skills")
 }
 fn default_steps() -> usize {
     3

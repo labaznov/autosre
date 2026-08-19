@@ -4,18 +4,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use autosre_app::config::{Digging, Incidents};
+use autosre_app::digger::{Digger, dig};
+use autosre_app::metrics::Metrics;
+use autosre_domain::{
+    Bucket, Detector, Deviation, Kind, Minute, Service, Signature, Span, Stream, Thresholds,
+};
+use autosre_model::{Model, Settings};
+use autosre_source::{Source, SourceError};
+use autosre_store::Store;
 use axum::Router;
 use axum::extract::State;
 use axum::routing::post;
-use sre_app::config::{Digging, Incidents};
-use sre_app::digger::{Digger, dig};
-use sre_app::metrics::Metrics;
-use sre_domain::{
-    Bucket, Detector, Deviation, Kind, Minute, Service, Signature, Span, Stream, Thresholds,
-};
-use sre_model::{Model, Settings};
-use sre_source::{Source, SourceError};
-use sre_store::Store;
 use tempfile::TempDir;
 
 /// Скилл, годный для всплеска ошибок на пятнадцати минутах.
@@ -107,7 +107,7 @@ impl Stand {
     /// Стенд без очереди: для проверок, которым нужен покой.
     async fn still(patience: Duration) -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
-        let store = Store::open(&directory.path().join("sre.db")).expect("база не открыта");
+        let store = Store::open(&directory.path().join("autosre.db")).expect("база не открыта");
         let skills = TempDir::new().expect("каталог скиллов не создан");
         std::fs::write(skills.path().join("error-burst.md"), SKILL).expect("скилл не записан");
 
@@ -132,11 +132,11 @@ impl Stand {
             &store,
             &Arc::new(Metrics::new("тест")),
             &model,
-            sre_skills::read(skills.path()).expect("скиллы не прочитаны"),
-            &sre_app::digger::Recipe {
+            autosre_skills::read(skills.path()).expect("скиллы не прочитаны"),
+            &autosre_app::digger::Recipe {
                 digging: &Digging::default().patient(patience),
                 incidents: &Incidents::default(),
-                knowledge: &sre_app::config::Knowledge::default()
+                knowledge: &autosre_app::config::Knowledge::default()
                     .drafting(directory.path().join("drafts")),
             },
         );
@@ -171,7 +171,7 @@ impl Stand {
     }
 
     /// Ждёт, пока у инцидента появится расследование в нужном состоянии.
-    async fn wait(&self, incident: i64, state: &str) -> Option<sre_store::Finding> {
+    async fn wait(&self, incident: i64, state: &str) -> Option<autosre_store::Finding> {
         for _ in 0..100 {
             if let Ok(Some(found)) = self.store.conclusion(incident).await
                 && found.state == state
@@ -279,7 +279,7 @@ async fn takes_a_torn_investigation_out_of_the_way() {
         .dig(incident, "error-burst", Minute::of(chrono::Utc::now()))
         .await
         .unwrap();
-    sre_app::digger::resume(&stand.digger).await;
+    autosre_app::digger::resume(&stand.digger).await;
     assert!(stand.store.unfinished().await.unwrap().is_empty());
 }
 
@@ -289,7 +289,7 @@ async fn marks_a_day_old_investigation_as_stale() {
     let incident = stand.incident(1).await;
     let old = Minute::of(chrono::Utc::now()).back(48 * 60);
     stand.store.dig(incident, "error-burst", old).await.unwrap();
-    sre_app::digger::resume(&stand.digger).await;
+    autosre_app::digger::resume(&stand.digger).await;
     assert_eq!(
         stand
             .store
@@ -311,7 +311,7 @@ async fn marks_a_fresh_torn_investigation_as_failed() {
         .dig(incident, "error-burst", Minute::of(chrono::Utc::now()))
         .await
         .unwrap();
-    sre_app::digger::resume(&stand.digger).await;
+    autosre_app::digger::resume(&stand.digger).await;
     assert_eq!(
         stand
             .store

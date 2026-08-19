@@ -1,4 +1,4 @@
-use sre_domain::{Detector, Kind, Thresholds};
+use autosre_domain::{Detector, Kind, Thresholds};
 
 /// Пороги, при которых видно поведение детектора, а не пороги.
 fn plain() -> Thresholds {

@@ -17,10 +17,10 @@
 use std::future::Future;
 use std::sync::Mutex;
 
+use autosre_domain::Minute;
+use autosre_model::{Ledger, Told};
+use autosre_store::{Lesson, Store};
 use chrono::Utc;
-use sre_domain::Minute;
-use sre_model::{Ledger, Told};
-use sre_store::{Lesson, Store};
 
 use crate::metrics::Metrics;
 

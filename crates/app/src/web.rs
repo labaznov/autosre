@@ -7,6 +7,8 @@
 use std::sync::Arc;
 
 use askama::Template;
+use autosre_domain::Minute;
+use autosre_store::Store;
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -14,8 +16,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use serde::Deserialize;
-use sre_domain::Minute;
-use sre_store::Store;
 
 use crate::config::{Corpus, Incidents, Knowledge};
 use crate::metrics::Metrics;
@@ -273,7 +273,7 @@ async fn waiting(State(shared): State<Shared>, headers: HeaderMap) -> Response {
 }
 
 /// Открытые заявки, самые старые первыми.
-async fn pending(shared: &Shared) -> Vec<sre_store::Asked> {
+async fn pending(shared: &Shared) -> Vec<autosre_store::Asked> {
     shared.store.pending(100).await.unwrap_or_default()
 }
 
@@ -405,10 +405,10 @@ async fn corpus(
 ///
 /// Маскирование по умолчанию: корпус уезжает из контура, а сигнатура ошибки от
 /// замены адресов и чисел не страдает — она и так маскированная.
-fn line(lesson: &sre_store::Learned, hide: bool) -> String {
+fn line(lesson: &autosre_store::Learned, hide: bool) -> String {
     let text = |it: &str| {
         if hide {
-            sre_domain::signature::hide(it)
+            autosre_domain::signature::hide(it)
         } else {
             it.to_owned()
         }
@@ -574,7 +574,7 @@ async fn split(
     };
     match shared
         .store
-        .split(id, &sre_domain::Stream::new(given.stream))
+        .split(id, &autosre_domain::Stream::new(given.stream))
         .await
     {
         Ok(Some(born)) => {
@@ -730,9 +730,9 @@ async fn move_draft(shared: &Shared, path: &str, who: &str, accepted: bool) {
     );
     let done = tokio::task::spawn_blocking(move || {
         if accepted {
-            sre_knowledge::draft::accept(&draft, &notes, &who).map(|_| ())
+            autosre_knowledge::draft::accept(&draft, &notes, &who).map(|_| ())
         } else {
-            sre_knowledge::draft::reject(&draft, &who)
+            autosre_knowledge::draft::reject(&draft, &who)
         }
     })
     .await;

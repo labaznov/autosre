@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use sre_knowledge::draft::{accept, reject, write};
-use sre_knowledge::{Draft, Note};
+use autosre_knowledge::draft::{accept, reject, write};
+use autosre_knowledge::{Draft, Note};
 use tempfile::TempDir;
 
 fn draft() -> Draft {

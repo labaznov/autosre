@@ -11,12 +11,12 @@
 
 | Метрика | Тип | Что значит |
 | :--- | :--- | :--- |
-| `sre_up` | gauge | всегда 1: агент ответил на запрос |
-| `sre_build_info{version}` | gauge | версия в метке |
-| `sre_started_timestamp_seconds` | gauge | момент запуска |
-| `sre_last_bucket_timestamp_seconds` | gauge | **момент последнего снятого бакета** |
+| `autosre_up` | gauge | всегда 1: агент ответил на запрос |
+| `autosre_build_info{version}` | gauge | версия в метке |
+| `autosre_started_timestamp_seconds` | gauge | момент запуска |
+| `autosre_last_bucket_timestamp_seconds` | gauge | **момент последнего снятого бакета** |
 
-Последняя — главная метрика агента. `sre_up` говорит только то, что процесс
+Последняя — главная метрика агента. `autosre_up` говорит только то, что процесс
 отвечает; агент бывает жив и слеп, и это то же самое, что лежать. До первого
 снятия метрики нет вовсе: выдумывать значение для «бакетов ещё не было» хуже,
 чем не отдавать ничего.
@@ -27,13 +27,13 @@
 
 | Метрика | Тип | Что значит |
 | :--- | :--- | :--- |
-| `sre_deviations_total` | counter | найденные отклонения |
-| `sre_sifted_total` | counter | отсеяно моделью как привычный шум |
-| `sre_hushed_total` | counter | приглушено человеком |
-| `sre_incidents_total` | counter | заведённые инциденты |
-| `sre_conclusions_total` | counter | готовые выводы расследований |
-| `sre_skipped_total` | counter | инциденты, дошедшие до дежурного без вывода |
-| `sre_source_failures_total` | counter | отказы источников и модели |
+| `autosre_deviations_total` | counter | найденные отклонения |
+| `autosre_sifted_total` | counter | отсеяно моделью как привычный шум |
+| `autosre_hushed_total` | counter | приглушено человеком |
+| `autosre_incidents_total` | counter | заведённые инциденты |
+| `autosre_conclusions_total` | counter | готовые выводы расследований |
+| `autosre_skipped_total` | counter | инциденты, дошедшие до дежурного без вывода |
+| `autosre_source_failures_total` | counter | отказы источников и модели |
 
 Отношение `sifted / deviations` — доля шума, которую гасит модель. Если она
 близка к нулю, отсев не работает и дежурный тонет; если близка к единице,
@@ -43,8 +43,8 @@
 
 | Метрика | Тип | Что значит |
 | :--- | :--- | :--- |
-| `sre_detection_seconds` | histogram | от наблюдения с отклонением до заведения инцидента |
-| `sre_conclusion_seconds` | histogram | от первого наблюдения инцидента до готового вывода |
+| `autosre_detection_seconds` | histogram | от наблюдения с отклонением до заведения инцидента |
+| `autosre_conclusion_seconds` | histogram | от первого наблюдения инцидента до готового вывода |
 
 Обе меряют то, что записано в критериях приёмки: 5 минут и 15 минут по 90-му
 процентилю ([SPEC §12](SPEC.md)). Отсчёт идёт от момента наблюдения, а не от
@@ -52,8 +52,8 @@
 незамеченной, а не сколько агент думал.
 
 ```promql
-histogram_quantile(0.9, rate(sre_detection_seconds_bucket[1d]))
-histogram_quantile(0.9, rate(sre_conclusion_seconds_bucket[1d]))
+histogram_quantile(0.9, rate(autosre_detection_seconds_bucket[1d]))
+histogram_quantile(0.9, rate(autosre_conclusion_seconds_bucket[1d]))
 ```
 
 Корзины сгущены вокруг целей: у обнаружения 1, 2, 5, 10, 15, 30, 60 минут; у
@@ -63,11 +63,11 @@ histogram_quantile(0.9, rate(sre_conclusion_seconds_bucket[1d]))
 
 | Метрика | Тип | Что значит |
 | :--- | :--- | :--- |
-| `sre_inquiries_total` | counter | заявки, оставленные дежурному |
-| `sre_inquiries_answered_total` | counter | заявки, на которые дежурный ответил |
-| `sre_drafts_total` | counter | написанные черновики заметок |
-| `sre_notes` | gauge | заметок базы знаний в поисковом индексе |
-| `sre_reports_total` | counter | собранные отчёты |
+| `autosre_inquiries_total` | counter | заявки, оставленные дежурному |
+| `autosre_inquiries_answered_total` | counter | заявки, на которые дежурный ответил |
+| `autosre_drafts_total` | counter | написанные черновики заметок |
+| `autosre_notes` | gauge | заметок базы знаний в поисковом индексе |
+| `autosre_reports_total` | counter | собранные отчёты |
 
 Разница между заведёнными и отвеченными заявками — это остановленные
 расследования. Растёт разрыв — дежурный не видит раздел «ждёт вас».
@@ -76,16 +76,16 @@ histogram_quantile(0.9, rate(sre_conclusion_seconds_bucket[1d]))
 
 | Метрика | Тип | Что значит |
 | :--- | :--- | :--- |
-| `sre_sifted_wrong_total` | counter | **отсеянное, признанное дежурным нужным** |
-| `sre_mute_dodged_total` | counter | инцидент по сервису с приглушением, но другой сигнатурой |
-| `sre_lessons_total` | counter | заходы в модель, записанные в корпус |
+| `autosre_sifted_wrong_total` | counter | **отсеянное, признанное дежурным нужным** |
+| `autosre_mute_dodged_total` | counter | инцидент по сервису с приглушением, но другой сигнатурой |
+| `autosre_lessons_total` | counter | заходы в модель, записанные в корпус |
 
-`sre_sifted_wrong_total` — ошибка первого рода: агент промолчал о том, о чём
+`autosre_sifted_wrong_total` — ошибка первого рода: агент промолчал о том, о чём
 должен был сказать. Считается отдельно от всего остального намеренно: смешивать
 её с долей ложных инцидентов нельзя, цена у этих ошибок разная. Число берётся
 из оценок на странице `/sifted` и потому меньше настоящего: увидели не всё.
 
-`sre_mute_dodged_total` отвечает на вопрос, надо ли расширять приглушение.
+`autosre_mute_dodged_total` отвечает на вопрос, надо ли расширять приглушение.
 Пока оно близко к нулю, точного совпадения пары достаточно
 ([ADR-0019](adr/0019-muting-instead-of-per-service-thresholds.md)).
 
@@ -108,19 +108,19 @@ histogram_quantile(0.9, rate(sre_conclusion_seconds_bucket[1d]))
 **Агент ослеп.** Самый важный: процесс жив, а данных не видит.
 
 ```promql
-time() - sre_last_bucket_timestamp_seconds > 300
+time() - autosre_last_bucket_timestamp_seconds > 300
 ```
 
 **Отказы источников или модели.**
 
 ```promql
-rate(sre_source_failures_total[15m]) > 0
+rate(autosre_source_failures_total[15m]) > 0
 ```
 
 **Очередь не успевает** — инциденты доходят до дежурного без разбора.
 
 ```promql
-increase(sre_skipped_total[1h]) > 3
+increase(autosre_skipped_total[1h]) > 3
 ```
 
 Алерт на «нет инцидентов» ставить не стоит: тишина бывает настоящей. Слепоту

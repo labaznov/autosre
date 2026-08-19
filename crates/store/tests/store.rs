@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
-use sre_domain::{
+use autosre_domain::{
     Bucket, Detector, Deviation, Hour, Kind, Minute, Service, Signature, Span, Stream, Thresholds,
 };
-use sre_store::Store;
+use autosre_store::Store;
+use chrono::{DateTime, Utc};
 use tempfile::TempDir;
 
 /// База во временном каталоге вместе с ним самим.
@@ -14,7 +14,8 @@ struct Base {
 impl Base {
     fn open() -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
-        let store = Store::open(&directory.path().join("nested/sre.db")).expect("база не открыта");
+        let store =
+            Store::open(&directory.path().join("nested/autosre.db")).expect("база не открыта");
         Self {
             store,
             _directory: directory,
@@ -152,7 +153,7 @@ async fn names_the_minutes_that_were_never_snapped() {
 #[tokio::test]
 async fn survives_a_reopen_of_the_same_file() {
     let directory = TempDir::new().expect("временный каталог не создан");
-    let path = directory.path().join("sre.db");
+    let path = directory.path().join("autosre.db");
     let at = minute("2026-08-17T10:01:00Z");
     Store::open(&path)
         .unwrap()
@@ -754,7 +755,7 @@ async fn keeps_why_the_incident_was_opened() {
 #[tokio::test]
 async fn brings_the_schema_up_to_date() {
     let directory = TempDir::new().expect("временный каталог не создан");
-    let path = directory.path().join("sre.db");
+    let path = directory.path().join("autosre.db");
     Store::open(&path).unwrap();
     let version: i64 = rusqlite::Connection::open(&path)
         .unwrap()
@@ -762,14 +763,14 @@ async fn brings_the_schema_up_to_date() {
         .unwrap();
     assert_eq!(
         usize::try_from(version).unwrap(),
-        sre_store::schema::STEPS.len()
+        autosre_store::schema::STEPS.len()
     );
 }
 
 #[tokio::test]
 async fn survives_a_lost_schema_version() {
     let directory = TempDir::new().expect("временный каталог не создан");
-    let path = directory.path().join("sre.db");
+    let path = directory.path().join("autosre.db");
     Store::open(&path).unwrap();
     // Так выглядит база, восстановленная из бэкапа или поправленная руками.
     rusqlite::Connection::open(&path)
@@ -782,7 +783,7 @@ async fn survives_a_lost_schema_version() {
 #[tokio::test]
 async fn keeps_the_data_after_a_repeated_migration() {
     let directory = TempDir::new().expect("временный каталог не создан");
-    let path = directory.path().join("sre.db");
+    let path = directory.path().join("autosre.db");
     let at = minute("2026-08-17T10:01:00Z");
     Store::open(&path)
         .unwrap()
@@ -825,7 +826,7 @@ async fn inquired(base: &Base, at: Minute) -> (i64, i64) {
         .ask(
             incident,
             dig,
-            &sre_domain::Inquiry::new("node-01", "df -h /var", "место на диске").unwrap(),
+            &autosre_domain::Inquiry::new("node-01", "df -h /var", "место на диске").unwrap(),
             at,
         )
         .await
@@ -981,8 +982,8 @@ async fn spares_a_fresh_inquiry_from_fading() {
 }
 
 /// Заметка для индекса: имя, заголовок, теги, сигнатуры, тело.
-fn memory(name: &str, tags: &str, marks: &str, body: &str) -> sre_store::Memory {
-    sre_store::Memory {
+fn memory(name: &str, tags: &str, marks: &str, body: &str) -> autosre_store::Memory {
+    autosre_store::Memory {
         name: name.to_owned(),
         title: format!("заметка {name}"),
         tags: tags.to_owned(),
@@ -1535,8 +1536,8 @@ async fn compares_a_stream_with_the_window_before() {
 }
 
 /// Отчёт, готовый лечь в базу.
-fn filing(body: &str) -> sre_store::Filing<'_> {
-    sre_store::Filing {
+fn filing(body: &str) -> autosre_store::Filing<'_> {
+    autosre_store::Filing {
         kind: "daily",
         name: "2026-08-17",
         title: "Сутки",
@@ -1950,7 +1951,7 @@ async fn brings_the_verdict_of_a_sift_into_the_corpus() {
     base.store.sift(id, "ночная выгрузка").await.unwrap();
     base.store
         .learn(
-            &sre_store::Lesson {
+            &autosre_store::Lesson {
                 kind: "triage".to_owned(),
                 model: "поддельная".to_owned(),
                 incident: None,

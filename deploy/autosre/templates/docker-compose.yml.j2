@@ -1,0 +1,19 @@
+services:
+  autosre:
+    build:
+      context: /opt/docker/autosre/src
+    image: autosre:{{ autosre_version }}
+    container_name: autosre
+    restart: unless-stopped
+    env_file: /opt/docker/autosre/.env
+    command: ["/etc/autosre/autosre.toml"]
+    ports:
+      - "{{ autosre_port }}:8096"
+    volumes:
+      - /opt/docker/autosre/autosre.toml:/etc/autosre/autosre.toml:ro
+      - /opt/data/autosre:/opt/data/autosre
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

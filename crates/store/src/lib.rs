@@ -11,11 +11,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use rusqlite::{Connection, OptionalExtension, params};
-use sre_domain::{
+use autosre_domain::{
     Bucket, Deviation, Hour, Incident, Kind, Minute, Service, Severity, Signature, Span, State,
     Stream, Tally,
 };
+use rusqlite::{Connection, OptionalExtension, params};
 use tokio::task;
 
 /// Сколько минут стоит за одним свёрнутым часом.
@@ -930,7 +930,7 @@ impl Store {
         &self,
         incident: i64,
         investigation: i64,
-        inquiry: &sre_domain::Inquiry,
+        inquiry: &autosre_domain::Inquiry,
         at: Minute,
     ) -> Result<i64, StoreError> {
         let inquiry = inquiry.clone();

@@ -2,13 +2,13 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use autosre_domain::{Detector, Deviation, Group, Kind, Minute, Signature, Stream, Thresholds};
+use autosre_model::{Model, ModelError, Settings, prompt};
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use serde_json::Value;
-use sre_domain::{Detector, Deviation, Group, Kind, Minute, Signature, Stream, Thresholds};
-use sre_model::{Model, ModelError, Settings, prompt};
 
 #[derive(Clone)]
 struct Reply {

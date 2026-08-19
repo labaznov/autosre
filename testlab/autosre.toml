@@ -5,7 +5,7 @@
 # сработает ничего.
 
 bind = "0.0.0.0:8096"
-database = "/opt/data/sreagent/sre.db"
+database = "/opt/data/autosre/autosre.db"
 
 [logs]
 url = "http://victorialogs:9428"
@@ -13,7 +13,7 @@ timeout = "30s"
 error_pattern = "i(error*) OR i(exception*) OR i(panic*) OR i(fatal*) OR i(traceback*)"
 # Агент пишет в те же логи, что читает. В лаборатории он в них не пишет, но
 # пусть исключение стоит с самого начала: забыть его дороже, чем не заметить.
-self_streams = ['{service="sreagent"}']
+self_streams = ['{service="autosre"}']
 
 [metrics]
 url = "http://victoriametrics:8428"
@@ -57,10 +57,10 @@ ratio = 1.5
 
 [[account]]
 login = "duty"
-# Хеш пароля `sreagent-lab`. Пароль лаборатории намеренно записан в README:
+# Хеш пароля `autosre-lab`. Пароль лаборатории намеренно записан в README:
 # прятать его тут не от кого, а войти нужно каждому, кто поднял стенд.
-# Получить свой: sreagent hash <пароль>
-password = "$argon2id$v=19$m=19456,t=2,p=1$N37Zjt7tGuTCu2B+BSpYRg$XeW5g91ZGp+auvy/iHsxYZVjWU4AtGqpmMudBuLJNHM"
+# Получить свой: autosre hash <пароль>
+password = "$argon2id$v=19$m=19456,t=2,p=1$O9GHrJc2UKEgDwzhQzmqiQ$aFf+x9lWyTDqf3FG9HSSPvbmYJVtpkDq4ANhjyMYx/c"
 
 [incidents]
 # Из каких меток селектора берётся имя сервиса, в порядке предпочтения.

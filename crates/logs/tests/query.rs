@@ -1,6 +1,6 @@
+use autosre_domain::{Minute, Span};
+use autosre_logs::{Filter, FilterError};
 use chrono::{DateTime, Utc};
-use sre_domain::{Minute, Span};
-use sre_logs::{Filter, FilterError};
 
 fn moment(text: &str) -> DateTime<Utc> {
     text.parse().expect("момент времени некорректен")
@@ -38,11 +38,11 @@ fn bounds_the_span_from_both_ends() {
 
 #[test]
 fn excludes_the_own_streams_of_the_agent() {
-    let filter = Filter::new("i(error*)", vec!["{container=\"sreagent\"}".to_owned()]).unwrap();
+    let filter = Filter::new("i(error*)", vec!["{container=\"autosre\"}".to_owned()]).unwrap();
     assert!(
         filter
             .buckets(quarter())
-            .contains("NOT (_stream:{container=\"sreagent\"})")
+            .contains("NOT (_stream:{container=\"autosre\"})")
     );
 }
 
@@ -51,7 +51,7 @@ fn excludes_every_own_stream() {
     let filter = Filter::new(
         "i(error*)",
         vec![
-            "{container=\"sreagent\"}".to_owned(),
+            "{container=\"autosre\"}".to_owned(),
             "{container=\"litellm\"}".to_owned(),
         ],
     )
@@ -59,7 +59,7 @@ fn excludes_every_own_stream() {
     assert!(
         filter
             .buckets(quarter())
-            .contains("NOT (_stream:{container=\"sreagent\"} OR _stream:{container=\"litellm\"})")
+            .contains("NOT (_stream:{container=\"autosre\"} OR _stream:{container=\"litellm\"})")
     );
 }
 

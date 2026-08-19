@@ -12,10 +12,10 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
+use autosre_domain::{Incident, Minute, Service};
+use autosre_model::Model;
+use autosre_store::{Digest, Store};
 use chrono::{Datelike, TimeZone, Utc};
-use sre_domain::{Incident, Minute, Service};
-use sre_model::Model;
-use sre_store::{Digest, Store};
 
 use crate::config::{Incidents, Knowledge};
 use crate::metrics::Metrics;
@@ -143,7 +143,7 @@ pub async fn single(reporter: &Reporter, incident: i64) -> Option<String> {
 
     let mut page = String::new();
     let _ = writeln!(page, "# {} — {}\n", found.service, found.signature);
-    if found.state == sre_domain::State::Open {
+    if found.state == autosre_domain::State::Open {
         page.push_str(
             "> Инцидент ещё идёт. Отчёт неполон: подтверждения продолжают приходить.\n\n",
         );
@@ -179,9 +179,9 @@ fn happened(found: &Incident) -> String {
             part,
             "- важность: {}",
             match severity {
-                sre_domain::Severity::Low => "работает хуже обычного",
-                sre_domain::Severity::Medium => "теряется часть работы",
-                sre_domain::Severity::High => "работа не делается",
+                autosre_domain::Severity::Low => "работает хуже обычного",
+                autosre_domain::Severity::Medium => "теряется часть работы",
+                autosre_domain::Severity::High => "работа не делается",
             }
         );
     }
@@ -202,7 +202,7 @@ fn happened(found: &Incident) -> String {
 }
 
 /// Часть «что выяснил агент».
-fn learned(finding: Option<&sre_store::Finding>) -> String {
+fn learned(finding: Option<&autosre_store::Finding>) -> String {
     let mut part = String::from("\n## Что выяснил агент\n\n");
     match finding {
         Some(finding) if finding.cause.is_some() => {
@@ -227,7 +227,7 @@ fn learned(finding: Option<&sre_store::Finding>) -> String {
 }
 
 /// Часть «что спрашивали у человека».
-fn questions(asked: &[sre_store::Asked]) -> String {
+fn questions(asked: &[autosre_store::Asked]) -> String {
     if asked.is_empty() {
         return String::new();
     }
@@ -252,7 +252,7 @@ fn questions(asked: &[sre_store::Asked]) -> String {
 ///
 /// Без неё отчёт превращается в список жалоб — [SPEC §9](../../../docs/SPEC.md)
 /// говорит это про недельный, но верно оно про любой.
-fn handled(found: &Incident, drafts: &[sre_store::Written]) -> String {
+fn handled(found: &Incident, drafts: &[autosre_store::Written]) -> String {
     let mut part = String::from("\n## Что делал человек\n\n");
     match found.verdict {
         Some(true) => part.push_str("Дежурный счёл инцидент по делу.\n"),
@@ -337,7 +337,7 @@ async fn week_page(reporter: &Reporter, digest: &Digest, name: &str) -> (String,
     let (picture, whole) = overall(reporter, digest, "неделю").await;
     page.push_str(&picture);
     if seen == 0 {
-        page.push_str("\nЗа неделю не заведено ни одного инцидента. Это либо спокойная неделя, либо ослепший агент — второе проверяется метрикой `sre_last_bucket_timestamp_seconds`.\n");
+        page.push_str("\nЗа неделю не заведено ни одного инцидента. Это либо спокойная неделя, либо ослепший агент — второе проверяется метрикой `autosre_last_bucket_timestamp_seconds`.\n");
     }
     (page, whole)
 }
@@ -356,7 +356,7 @@ fn incidents_part(digest: &Digest) -> String {
             incident.service,
             incident.signature,
             incident.seen,
-            if incident.state == sre_domain::State::Open {
+            if incident.state == autosre_domain::State::Open {
                 "идёт".to_owned()
             } else {
                 format!("закрыт, {}", lasted(incident))
@@ -507,7 +507,7 @@ async fn keep(reporter: &Reporter, kind: &str, name: &str, title: &str, body: &s
     match reporter
         .store
         .file(
-            sre_store::Filing {
+            autosre_store::Filing {
                 kind,
                 name,
                 title,

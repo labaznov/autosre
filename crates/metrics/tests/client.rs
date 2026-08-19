@@ -3,13 +3,13 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use autosre_domain::{Kind, Minute, Span};
+use autosre_metrics::{Metrics, Settings};
+use autosre_source::{Source, SourceError};
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::routing::get;
-use sre_domain::{Kind, Minute, Span};
-use sre_metrics::{Metrics, Settings};
-use sre_source::{Source, SourceError};
 
 #[derive(Clone)]
 struct Reply {
@@ -195,7 +195,7 @@ async fn fails_on_an_answer_without_results() {
 #[tokio::test]
 async fn has_no_samples_to_give() {
     let fake = Fake::start(StatusCode::OK, MEMORY).await;
-    let stream = sre_domain::Stream::new("{job=\"llama-server\"}");
+    let stream = autosre_domain::Stream::new("{job=\"llama-server\"}");
     assert!(
         fake.metrics(&["x_bytes"])
             .samples(&stream, quarter(), 10)

@@ -1,4 +1,4 @@
-use sre_domain::Inquiry;
+use autosre_domain::Inquiry;
 
 #[test]
 fn takes_a_command_that_only_looks() {

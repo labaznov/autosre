@@ -1,6 +1,6 @@
 //! Промпты и подготовка данных для модели.
 
-use sre_domain::{Deviation, Group};
+use autosre_domain::{Deviation, Group};
 
 /// Системный промпт отсева.
 ///

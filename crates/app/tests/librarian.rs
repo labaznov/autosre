@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sre_app::config::Knowledge;
-use sre_app::librarian::{keep, learn};
-use sre_app::metrics::Metrics;
-use sre_store::Store;
+use autosre_app::config::Knowledge;
+use autosre_app::librarian::{keep, learn};
+use autosre_app::metrics::Metrics;
+use autosre_store::Store;
 use tempfile::TempDir;
 
 /// Заметка, годная во всём.
@@ -33,7 +33,7 @@ impl Shelf {
     fn new() -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
         let notes = TempDir::new().expect("каталог заметок не создан");
-        let store = Store::open(&directory.path().join("sre.db")).expect("база не открыта");
+        let store = Store::open(&directory.path().join("autosre.db")).expect("база не открыта");
         let settings =
             Knowledge::default().shelf(notes.path().to_path_buf(), Duration::from_millis(100));
         Self {
@@ -90,7 +90,7 @@ async fn shows_the_number_of_notes_in_the_metrics() {
     let shelf = Shelf::new();
     shelf.write("vl-no-space-left");
     learn(&shelf.store, &shelf.metrics, &shelf.settings).await;
-    assert!(shelf.metrics.expose().contains("sre_notes 1"));
+    assert!(shelf.metrics.expose().contains("autosre_notes 1"));
 }
 
 #[tokio::test]

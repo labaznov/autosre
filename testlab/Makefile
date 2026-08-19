@@ -44,7 +44,7 @@ errors:
 
 buckets:
 	@$(COMPOSE) --profile agent exec agent sh -c \
-		'wget -qO- http://127.0.0.1:8096/metrics | grep -E "sre_last_bucket|sre_source_failures"'
+		'wget -qO- http://127.0.0.1:8096/metrics | grep -E "autosre_last_bucket|autosre_source_failures"'
 
 down:
 	$(COMPOSE) --profile agent down

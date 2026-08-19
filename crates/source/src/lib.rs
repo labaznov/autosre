@@ -10,7 +10,7 @@
 //! процесс, если такое когда-нибудь понадобится.
 
 use async_trait::async_trait;
-use sre_domain::{Bucket, Span, Stream};
+use autosre_domain::{Bucket, Span, Stream};
 
 /// Отказы источника.
 ///

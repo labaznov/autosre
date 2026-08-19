@@ -12,15 +12,15 @@
 
 | Переменная | Обязательна | Что это |
 | :--- | :---: | :--- |
-| `sreagent_model_key` | да | ключ LiteLLM |
-| `sreagent_session_key` | да | ключ подписи сессий веб-морды |
-| `sreagent_accounts` | да | список `{login, password}`, пароль — хешем |
-| `sreagent_knowledge_repo` | нет | репозиторий знаний; без него скиллов не будет |
-| `sreagent_logs_url`, `sreagent_metrics_url`, `sreagent_model_url` | нет | адреса, по умолчанию боевые |
-| `sreagent_logs_password` | нет | пароль VictoriaLogs |
-| `sreagent_self_streams` | нет | селектор собственных потоков агента |
-| `sreagent_corpus`, `sreagent_corpus_raw` | нет | сбор живых данных и выдача сырья без маскирования |
-| `sreagent_port`, `sreagent_version`, `sreagent_log_level` | нет | порт, тег образа, уровень журнала |
+| `autosre_model_key` | да | ключ LiteLLM |
+| `autosre_session_key` | да | ключ подписи сессий веб-морды |
+| `autosre_accounts` | да | список `{login, password}`, пароль — хешем |
+| `autosre_knowledge_repo` | нет | репозиторий знаний; без него скиллов не будет |
+| `autosre_logs_url`, `autosre_metrics_url`, `autosre_model_url` | нет | адреса, по умолчанию боевые |
+| `autosre_logs_password` | нет | пароль VictoriaLogs |
+| `autosre_self_streams` | нет | селектор собственных потоков агента |
+| `autosre_corpus`, `autosre_corpus_raw` | нет | сбор живых данных и выдача сырья без маскирования |
+| `autosre_port`, `autosre_version`, `autosre_log_level` | нет | порт, тег образа, уровень журнала |
 
 Если в инвентаре уже есть общие `victorialogs_url` и `victoriametrics_url`,
 роль возьмёт их: отдельно задавать адреса не нужно.
@@ -28,7 +28,7 @@
 Хеш пароля считается самим агентом:
 
 ```bash
-docker run --rm sreagent:latest hash 'пароль'
+docker run --rm autosre:latest hash 'пароль'
 ```
 
 Считать его на стороннем сайте — значит отправить туда пароль.
@@ -36,7 +36,7 @@ docker run --rm sreagent:latest hash 'пароль'
 ## Запуск
 
 ```bash
-ansible-playbook -i inventory/prod sreagent.yaml
+ansible-playbook -i inventory/prod autosre.yaml
 ```
 
 Роль копирует исходники на хост и собирает образ там же: сборка Rust требует

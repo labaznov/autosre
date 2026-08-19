@@ -3,14 +3,14 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use autosre_domain::{Minute, Span, Stream};
+use autosre_logs::{Filter, Logs, Settings};
+use autosre_source::{Source, SourceError};
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use chrono::{DateTime, Utc};
-use sre_domain::{Minute, Span, Stream};
-use sre_logs::{Filter, Logs, Settings};
-use sre_source::{Source, SourceError};
 
 /// Что поддельная Victoria Logs увидела в запросе.
 #[derive(Debug, Clone, PartialEq, Eq)]

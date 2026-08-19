@@ -4,9 +4,9 @@
 //! строки, и вёрстка не знает ни про типы предметной области, ни про
 //! округления, ни про бесконечности.
 
+use autosre_domain::{Incident, Minute, State};
+use autosre_store::{Asked, Finding, Muted, Written};
 use chrono::{TimeZone, Utc};
-use sre_domain::{Incident, Minute, State};
-use sre_store::{Asked, Finding, Muted, Written};
 
 /// Инцидент в том виде, в каком его читает человек.
 pub struct Card {
@@ -183,11 +183,11 @@ impl Card {
             verdict: incident.verdict,
             because: incident.because,
             severity: incident.severity.map(|it| match it {
-                sre_domain::Severity::Low => "хуже обычного",
-                sre_domain::Severity::Medium => "теряем часть работы",
-                sre_domain::Severity::High => "работа не делается",
+                autosre_domain::Severity::Low => "хуже обычного",
+                autosre_domain::Severity::Medium => "теряем часть работы",
+                autosre_domain::Severity::High => "работа не делается",
             }),
-            loud: incident.severity == Some(sre_domain::Severity::High),
+            loud: incident.severity == Some(autosre_domain::Severity::High),
             related,
             cause: finding.and_then(|it| it.cause.clone()),
             advice: finding.and_then(|it| it.advice.clone()),
@@ -234,7 +234,7 @@ impl Card {
 
     /// Та же карточка с историей группировки: из чего собрана и на что делится.
     #[must_use]
-    pub fn built(self, merged: Vec<i64>, parts: &[(sre_domain::Stream, u64)]) -> Self {
+    pub fn built(self, merged: Vec<i64>, parts: &[(autosre_domain::Stream, u64)]) -> Self {
         Self {
             merged,
             parts: parts
@@ -280,7 +280,7 @@ pub struct Filed {
 
 impl Filed {
     #[must_use]
-    pub fn of(filed: &sre_store::Filed) -> Self {
+    pub fn of(filed: &autosre_store::Filed) -> Self {
         Self {
             kind: filed.kind.clone(),
             name: filed.name.clone(),
@@ -306,15 +306,15 @@ pub struct Line {
 
 impl Line {
     #[must_use]
-    pub fn of(watched: &sre_store::Watched) -> Self {
+    pub fn of(watched: &autosre_store::Watched) -> Self {
         Self {
             source: watched.source.clone(),
             stream: watched.stream.to_string(),
             last: moment(watched.last),
             buckets: watched.buckets,
             kind: match watched.kind {
-                sre_domain::Kind::Mean => "уровень",
-                sre_domain::Kind::Sum => "счётчик",
+                autosre_domain::Kind::Mean => "уровень",
+                autosre_domain::Kind::Sum => "счётчик",
             },
         }
     }
@@ -338,10 +338,10 @@ pub struct Dropped {
 
 impl Dropped {
     #[must_use]
-    pub fn of(sifted: &sre_store::Sifted, labels: &[String]) -> Self {
+    pub fn of(sifted: &autosre_store::Sifted, labels: &[String]) -> Self {
         Self {
             id: sifted.id,
-            service: sre_domain::Service::of(&sifted.stream, labels).to_string(),
+            service: autosre_domain::Service::of(&sifted.stream, labels).to_string(),
             stream: sifted.stream.to_string(),
             source: sifted.source.clone(),
             horizon: sifted.horizon.clone(),

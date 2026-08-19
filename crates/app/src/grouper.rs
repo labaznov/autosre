@@ -9,13 +9,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use autosre_domain::signature::groups;
+use autosre_domain::{Deviation, Minute, Service, Signature, Span};
+use autosre_source::Source;
+use autosre_store::Store;
 use chrono::Utc;
-use sre_domain::signature::groups;
-use sre_domain::{Deviation, Minute, Service, Signature, Span};
-use sre_source::Source;
-use sre_store::Store;
 
-use sre_model::{Model, prompt};
+use autosre_model::{Model, prompt};
 
 use crate::config::Incidents;
 use crate::metrics::Metrics;
@@ -142,8 +142,8 @@ async fn sifter(
     store: &Store,
     metrics: &Metrics,
     model: &Model,
-    about: (i64, &Deviation, &Service, &[sre_domain::Group]),
-) -> Option<(String, Vec<sre_model::Told>)> {
+    about: (i64, &Deviation, &Service, &[autosre_domain::Group]),
+) -> Option<(String, Vec<autosre_model::Told>)> {
     let (id, deviation, service, groups) = about;
     // Отсев спрашивают до того, как инцидент существует, поэтому заход
     // придерживается и записывается позже, когда номер станет известен: урок
@@ -197,7 +197,7 @@ async fn hushed(
     store: &Store,
     metrics: &Metrics,
     deviation: i64,
-    about: (&Service, &Signature, &sre_domain::Stream),
+    about: (&Service, &Signature, &autosre_domain::Stream),
 ) -> bool {
     let (service, signature, stream) = about;
     let Ok(Some(mute)) = store
@@ -280,7 +280,7 @@ async fn messages(source: &dyn Source, deviation: &Deviation, settings: &Inciden
 ///
 /// Собирается напрямую, а не через маскирование: там числа заменяются
 /// заглушками, и «15m» превращается в «<n>m» — имя, которого никто не поймёт.
-fn pick(groups: &[sre_domain::Group], deviation: &Deviation) -> Signature {
+fn pick(groups: &[autosre_domain::Group], deviation: &Deviation) -> Signature {
     if let Some(group) = groups.first() {
         return group.signature.clone();
     }

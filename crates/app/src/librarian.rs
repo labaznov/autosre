@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use sre_store::{Memory, Store};
+use autosre_store::{Memory, Store};
 
 use crate::config::Knowledge;
 use crate::metrics::Metrics;
@@ -26,7 +26,7 @@ pub fn keep(store: &Store, metrics: &Arc<Metrics>, settings: &Knowledge) {
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            let touched = sre_knowledge::touched(&settings.notes).ok();
+            let touched = autosre_knowledge::touched(&settings.notes).ok();
             if touched.is_some() && touched == known {
                 continue;
             }
@@ -38,7 +38,7 @@ pub fn keep(store: &Store, metrics: &Arc<Metrics>, settings: &Knowledge) {
 
 /// Перечитывает каталог заметок и пересобирает индекс.
 pub async fn learn(store: &Store, metrics: &Arc<Metrics>, settings: &Knowledge) {
-    let notes = match sre_knowledge::read(&settings.notes) {
+    let notes = match autosre_knowledge::read(&settings.notes) {
         Ok(notes) => notes,
         Err(failure) => {
             tracing::warn!(

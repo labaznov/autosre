@@ -172,7 +172,7 @@ fn commit(added: &Path, removed: &Path, message: &str, who: &str) {
             "-c",
             "user.name=Auto SRE",
             "-c",
-            "user.email=sreagent@localhost",
+            "user.email=autosre@localhost",
             "commit",
             "-m",
             &format!("{message}\n\nПринял: {who}"),

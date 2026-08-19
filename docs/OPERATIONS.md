@@ -45,7 +45,7 @@ OpenAI-совместимым API. Ни в одно из них он не пиш
 | Минутные бакеты, 7 суток | 200 × 1440 × 7 ≈ 2 млн строк, порядка 150 МБ |
 | Часовые бакеты, 395 суток | 200 × 24 × 395 ≈ 1,9 млн строк, порядка 130 МБ |
 | Инциденты, расследования, корпус | десятки мегабайт в месяц |
-| **Диск под `/opt/data/sreagent`** | **заложите 2 ГБ** |
+| **Диск под `/opt/data/autosre`** | **заложите 2 ГБ** |
 | Память процесса | сотни мегабайт: в памяти живут окна одного прохода |
 | Процессор | считает медиану и MAD раз в минуту; доли ядра |
 
@@ -58,18 +58,18 @@ OpenAI-совместимым API. Ни в одно из них он не пиш
 
 ## 4. Установка
 
-Роль Ansible — [`deploy/auto-sre/`](../deploy/auto-sre/README.md). Обязательны
-три переменные: `sreagent_model_key`, `sreagent_session_key` и
-`sreagent_accounts`. Без них агент не стартует и говорит, какой именно
+Роль Ansible — [`deploy/autosre/`](../deploy/autosre/README.md). Обязательны
+три переменные: `autosre_model_key`, `autosre_session_key` и
+`autosre_accounts`. Без них агент не стартует и говорит, какой именно
 переменной не хватает.
 
 Хеш пароля считает сам агент, чтобы пароль не уезжал на сторонний сайт:
 
 ```bash
-docker run --rm sreagent:latest hash 'пароль'
+docker run --rm autosre:latest hash 'пароль'
 ```
 
-Настройки — в [`examples/sreagent.toml`](../examples/sreagent.toml), там
+Настройки — в [`examples/autosre.toml`](../examples/autosre.toml), там
 описано каждое поле. Секреты в файл не кладутся никогда: только через
 окружение ([ADR-0025](adr/0025-config-file-and-secrets.md)).
 
@@ -79,7 +79,7 @@ docker run --rm sreagent:latest hash 'пароль'
 окружении ([ADR-0025](adr/0025-config-file-and-secrets.md)).
 
 ```toml
-# /etc/sreagent/sreagent.toml
+# /etc/autosre/autosre.toml
 [model]
 url = "http://litellm:4000"                 # корень OpenAI-совместимого API
 name = "gemma-4-12B-it-qat-q4_0-gguf"       # имя модели так, как его знает сервер
@@ -90,11 +90,11 @@ temperature = 0.2
 
 ```bash
 # окружение контейнера
-SREAGENT_MODEL_KEY=sk-…
+AUTOSRE_MODEL_KEY=sk-…
 ```
 
-В роли Ansible те же три вещи — `sreagent_model_url`, `sreagent_model_name`,
-`sreagent_model_key`.
+В роли Ansible те же три вещи — `autosre_model_url`, `autosre_model_name`,
+`autosre_model_key`.
 
 Агент дописывает к адресу `v1/chat/completions` и ходит с заголовком
 `Authorization: Bearer <ключ>`. Больше он ничего не знает: любой сервер с
@@ -113,7 +113,7 @@ OpenAI-совместимым API подойдёт, менять код для �
 
 ```bash
 curl -s http://litellm:4000/v1/chat/completions \
-  -H "Authorization: Bearer $SREAGENT_MODEL_KEY" \
+  -H "Authorization: Bearer $AUTOSRE_MODEL_KEY" \
   -H 'content-type: application/json' \
   -d '{"model":"gemma-4-12B-it-qat-q4_0-gguf",
        "messages":[{"role":"user","content":"верни {\"worth\": true}"}],
@@ -184,15 +184,15 @@ minutes=375». Если в источнике истории нет, ждать 
 дежурного невосстановимы в принципе — это работа человека.
 
 База в режиме WAL, поэтому **копировать файл на живом агенте нельзя**: рядом
-лежат `sre.db-wal` и `sre.db-shm`, и копия без них битая. Два верных способа:
+лежат `autosre.db-wal` и `autosre.db-shm`, и копия без них битая. Два верных способа:
 
 ```bash
 # Способ первый: снять копию на живой базе средствами SQLite
-sqlite3 /opt/data/sreagent/sre.db ".backup '/var/backups/sre-$(date +%F).db'"
+sqlite3 /opt/data/autosre/autosre.db ".backup '/var/backups/autosre-$(date +%F).db'"
 
 # Способ второй: остановить агента и скопировать все три файла
 docker compose stop agent
-cp /opt/data/sreagent/sre.db* /var/backups/
+cp /opt/data/autosre/autosre.db* /var/backups/
 docker compose start agent
 ```
 
@@ -225,18 +225,18 @@ docker compose start agent
 Полный список показателей — [`METRICS.md`](METRICS.md). Минимум, ради которого
 стоит завести алерты:
 
-**`time() - sre_last_bucket_timestamp_seconds > 300`** — агент ослеп. Главный
+**`time() - autosre_last_bucket_timestamp_seconds > 300`** — агент ослеп. Главный
 алерт: процесс жив, отвечает на проверку здоровья, и не видит ничего.
 
-**`rate(sre_source_failures_total[15m]) > 0`** — источник или модель отвечают
+**`rate(autosre_source_failures_total[15m]) > 0`** — источник или модель отвечают
 отказом.
 
-**`sre_skipped_total` растёт** — очередь не успевает, инциденты доходят до
+**`autosre_skipped_total` растёт** — очередь не успевает, инциденты доходят до
 дежурного без разбора. Либо модель медленная, либо шума слишком много.
 
 ## 11. Что делать, когда
 
-**Агент не находит ничего, а логи есть.** Смотрите `sre_deviations_total`. Ноль
+**Агент не находит ничего, а логи есть.** Смотрите `autosre_deviations_total`. Ноль
 на молодой установке — нормально, см. §6. Ноль на старой — проверьте страницу
 `/series`: там видно, за чем агент наблюдает на самом деле. Пустая страница
 означает, что до источника он не доходит.

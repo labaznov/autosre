@@ -139,12 +139,12 @@ impl Metrics {
             inquiries: AtomicU64::new(0),
             answered: AtomicU64::new(0),
             detection: Spread::new(
-                "sre_detection_seconds",
+                "autosre_detection_seconds",
                 "Время от наблюдения с отклонением до заведения инцидента",
                 DETECTION,
             ),
             conclusion: Spread::new(
-                "sre_conclusion_seconds",
+                "autosre_conclusion_seconds",
                 "Время от первого наблюдения инцидента до готового вывода",
                 CONCLUSION,
             ),
@@ -255,85 +255,85 @@ impl Metrics {
     fn counters(&self, out: &mut String) {
         counter(
             out,
-            "sre_deviations_total",
+            "autosre_deviations_total",
             "Найденные отклонения",
             &self.deviations.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_incidents_total",
+            "autosre_incidents_total",
             "Заведённые инциденты",
             &self.incidents.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_sifted_total",
+            "autosre_sifted_total",
             "Отклонения, отсеянные как привычный шум",
             &self.sifted.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_conclusions_total",
+            "autosre_conclusions_total",
             "Готовые выводы расследований",
             &self.concluded.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_skipped_total",
+            "autosre_skipped_total",
             "Инциденты, дошедшие до дежурного без вывода",
             &self.skipped.load(Ordering::Relaxed).to_string(),
         );
         gauge(
             out,
-            "sre_notes",
+            "autosre_notes",
             "Заметки базы знаний в поисковом индексе",
             &self.notes.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_reports_total",
+            "autosre_reports_total",
             "Собранные отчёты",
             &self.reports.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_hushed_total",
+            "autosre_hushed_total",
             "Отклонения, приглушённые человеком",
             &self.hushed.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_sifted_wrong_total",
+            "autosre_sifted_wrong_total",
             "Отсеянное, признанное дежурным нужным: агент промолчал зря",
             &self.misheard.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_lessons_total",
+            "autosre_lessons_total",
             "Заходы в модель, записанные в корпус живых данных",
             &self.lessons.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_mute_dodged_total",
+            "autosre_mute_dodged_total",
             "Инциденты по сервису с действующим приглушением, но другой сигнатурой",
             &self.dodged.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_drafts_total",
+            "autosre_drafts_total",
             "Написанные черновики заметок",
             &self.drafts.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_inquiries_total",
+            "autosre_inquiries_total",
             "Заявки, оставленные дежурному",
             &self.inquiries.load(Ordering::Relaxed).to_string(),
         );
         counter(
             out,
-            "sre_inquiries_answered_total",
+            "autosre_inquiries_answered_total",
             "Заявки, на которые дежурный ответил",
             &self.answered.load(Ordering::Relaxed).to_string(),
         );
@@ -347,23 +347,23 @@ impl Metrics {
     #[must_use]
     pub fn expose(&self) -> String {
         let mut out = String::new();
-        gauge(&mut out, "sre_up", "Агент отвечает", "1");
+        gauge(&mut out, "autosre_up", "Агент отвечает", "1");
         gauge(
             &mut out,
-            "sre_started_timestamp_seconds",
+            "autosre_started_timestamp_seconds",
             "Момент запуска агента",
             &self.started.to_string(),
         );
         let _ = writeln!(
             out,
-            "# HELP sre_build_info Версия агента\n# TYPE sre_build_info gauge\nsre_build_info{{version=\"{}\"}} 1",
+            "# HELP autosre_build_info Версия агента\n# TYPE autosre_build_info gauge\nsre_build_info{{version=\"{}\"}} 1",
             self.version
         );
         let last = self.last_bucket.load(Ordering::Relaxed);
         if last > 0 {
             gauge(
                 &mut out,
-                "sre_last_bucket_timestamp_seconds",
+                "autosre_last_bucket_timestamp_seconds",
                 "Момент последнего снятого бакета",
                 &last.to_string(),
             );
@@ -373,7 +373,7 @@ impl Metrics {
         self.conclusion.expose(&mut out);
         counter(
             &mut out,
-            "sre_source_failures_total",
+            "autosre_source_failures_total",
             "Отказы источников и модели",
             &self.failures.load(Ordering::Relaxed).to_string(),
         );

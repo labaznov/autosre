@@ -1,5 +1,5 @@
-use sre_domain::signature::groups;
-use sre_domain::{Service, Signature, Stream};
+use autosre_domain::signature::groups;
+use autosre_domain::{Service, Signature, Stream};
 
 #[test]
 fn masks_numbers() {
@@ -130,26 +130,28 @@ fn keeps_the_whole_selector_when_no_label_fits() {
 
 #[test]
 fn hides_the_address_of_a_host_in_a_lesson() {
-    assert!(!sre_domain::signature::hide("upstream 192.0.2.19 timed out").contains("192.0.2"));
+    assert!(!autosre_domain::signature::hide("upstream 192.0.2.19 timed out").contains("192.0.2"));
 }
 
 #[test]
 fn keeps_the_numbers_a_lesson_is_learned_from() {
-    let hidden = sre_domain::signature::hide("Значение за окно: 936500000, обычно: 1371500000");
+    let hidden = autosre_domain::signature::hide("Значение за окно: 936500000, обычно: 1371500000");
     assert!(hidden.contains("936500000"));
 }
 
 #[test]
 fn keeps_the_width_of_a_horizon_in_a_lesson() {
-    assert!(sre_domain::signature::hide("горизонт: 15m").contains("15m"));
+    assert!(autosre_domain::signature::hide("горизонт: 15m").contains("15m"));
 }
 
 #[test]
 fn hides_a_token_that_only_looks_like_a_number() {
-    assert!(!sre_domain::signature::hide("session deadbeefcafe1234").contains("deadbeef"));
+    assert!(!autosre_domain::signature::hide("session deadbeefcafe1234").contains("deadbeef"));
 }
 
 #[test]
 fn keeps_the_path_that_ran_out_of_space() {
-    assert!(sre_domain::signature::hide("no space left on /var/lib/docker").contains("/var/lib"));
+    assert!(
+        autosre_domain::signature::hide("no space left on /var/lib/docker").contains("/var/lib")
+    );
 }

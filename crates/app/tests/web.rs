@@ -5,11 +5,11 @@ use std::time::{Duration, SystemTime};
 use argon2::Argon2;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHasher, SaltString};
-use sre_app::config::Account;
-use sre_app::metrics::Metrics;
-use sre_app::session::Doorman;
-use sre_app::web::{Shared, routes};
-use sre_store::Store;
+use autosre_app::config::Account;
+use autosre_app::metrics::Metrics;
+use autosre_app::session::Doorman;
+use autosre_app::web::{Shared, routes};
+use autosre_store::Store;
 use tempfile::TempDir;
 
 /// Пароль дежурного в лаборатории.
@@ -20,14 +20,14 @@ struct Agent {
     address: SocketAddr,
     shared: Shared,
     store: Store,
-    knowledge: sre_app::config::Knowledge,
+    knowledge: autosre_app::config::Knowledge,
     _directory: TempDir,
 }
 
 impl Agent {
     async fn start() -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
-        let store = Store::open(&directory.path().join("sre.db")).expect("база не открыта");
+        let store = Store::open(&directory.path().join("autosre.db")).expect("база не открыта");
         let doorman = Doorman::new(
             vec![Account {
                 login: "duty".to_owned(),
@@ -35,7 +35,7 @@ impl Agent {
             }],
             "ключ-подписи-стенда",
         );
-        let knowledge = sre_app::config::Knowledge::default()
+        let knowledge = autosre_app::config::Knowledge::default()
             .shelf(directory.path().join("notes"), Duration::from_mins(5))
             .drafting(directory.path().join("drafts"));
         let shared = Shared::new(
@@ -95,7 +95,7 @@ impl Agent {
             .get("set-cookie")
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned)
-            .filter(|cookie| !cookie.starts_with("sreagent=;"))
+            .filter(|cookie| !cookie.starts_with("autosre=;"))
     }
 
     /// Ставит оценку инциденту.
@@ -150,7 +150,9 @@ fn hashed(password: &str) -> String {
 
 /// Заводит инцидент прямо в базе, минуя конвейер.
 async fn incident(agent: &Agent) -> i64 {
-    use sre_domain::{Detector, Deviation, Kind, Minute, Service, Signature, Stream, Thresholds};
+    use autosre_domain::{
+        Detector, Deviation, Kind, Minute, Service, Signature, Stream, Thresholds,
+    };
     let at = Minute::at(1_786_968_660);
     let stream = Stream::new("{host=\"node-01\",service=\"orders-api\"}");
     let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
@@ -173,7 +175,9 @@ async fn incident(agent: &Agent) -> i64 {
 
 /// Заводит второй инцидент — другого сервиса и другой сигнатуры.
 async fn other(agent: &Agent) -> i64 {
-    use sre_domain::{Detector, Deviation, Kind, Minute, Service, Signature, Stream, Thresholds};
+    use autosre_domain::{
+        Detector, Deviation, Kind, Minute, Service, Signature, Stream, Thresholds,
+    };
     let at = Minute::at(1_786_968_720);
     let stream = Stream::new("{host=\"node-01\",service=\"billing-api\"}");
     let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
@@ -225,7 +229,7 @@ async fn opens_the_metrics_without_a_login() {
             .text()
             .await
             .unwrap()
-            .contains("sre_up")
+            .contains("autosre_up")
     );
 }
 
@@ -240,7 +244,7 @@ async fn shows_the_bucket_moment_once_there_is_one() {
             .text()
             .await
             .unwrap()
-            .contains("sre_last_bucket_timestamp_seconds")
+            .contains("autosre_last_bucket_timestamp_seconds")
     );
 }
 
@@ -304,7 +308,7 @@ async fn shows_the_feed_to_the_one_who_entered() {
 #[tokio::test]
 async fn refuses_a_forged_session() {
     let agent = Agent::start().await;
-    let forged = "sreagent=duty:99999999999.поддельная-подпись";
+    let forged = "autosre=duty:99999999999.поддельная-подпись";
     assert_eq!(agent.inside("/", forged).await.status(), 303);
 }
 
@@ -423,21 +427,21 @@ async fn concluded(agent: &Agent) -> i64 {
     let id = incident(agent).await;
     let dig = agent
         .store
-        .dig(id, "error-burst", sre_domain::Minute::at(1_786_968_660))
+        .dig(id, "error-burst", autosre_domain::Minute::at(1_786_968_660))
         .await
         .unwrap();
     agent
         .store
         .conclude(
-            &sre_store::Reached {
+            &autosre_store::Reached {
                 investigation: dig,
                 cause: "апстрим перестал отвечать после выката",
                 confidence: 0.7,
                 advice: "проверить откат апстрима",
                 note: None,
-                severity: sre_domain::Severity::High,
+                severity: autosre_domain::Severity::High,
             },
-            sre_domain::Minute::at(1_786_968_720),
+            autosre_domain::Minute::at(1_786_968_720),
         )
         .await
         .unwrap();
@@ -464,7 +468,7 @@ async fn says_plainly_when_the_queue_did_not_reach() {
     let id = incident(&agent).await;
     let dig = agent
         .store
-        .dig(id, "—", sre_domain::Minute::at(1_786_968_660))
+        .dig(id, "—", autosre_domain::Minute::at(1_786_968_660))
         .await
         .unwrap();
     agent.store.drop_dig(dig, "skipped").await.unwrap();
@@ -494,7 +498,7 @@ async fn breaks_a_long_number_into_groups() {
 
 /// Заводит инцидент с открытой заявкой и отвечает её номером.
 async fn asked(agent: &Agent) -> (i64, i64) {
-    use sre_domain::{Inquiry, Minute};
+    use autosre_domain::{Inquiry, Minute};
     let incident = incident(agent).await;
     let at = Minute::at(1_786_968_660);
     let dig = agent.store.dig(incident, "error-burst", at).await.unwrap();
@@ -615,12 +619,12 @@ async fn keeps_an_answer_from_a_stranger() {
 
 /// Заводит инцидент с непринятым черновиком и отвечает его номером.
 async fn drafted(agent: &Agent) -> (i64, i64) {
-    use sre_domain::Minute;
+    use autosre_domain::Minute;
     let incident = incident(agent).await;
     let drafts = agent.knowledge.drafts.clone();
-    let path = sre_knowledge::draft::write(
+    let path = autosre_knowledge::draft::write(
         &drafts,
-        &sre_knowledge::Draft {
+        &autosre_knowledge::Draft {
             name: "2026-08-17-orders-api-1".to_owned(),
             title: "Апстрим orders-api перестал отвечать".to_owned(),
             kind: "incident".to_owned(),
@@ -733,7 +737,7 @@ async fn hushes_a_pair_the_duty_engineer_is_tired_of() {
     let id = incident(&agent).await;
     let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.mute(id, "7", &cookie).await;
-    let now = sre_domain::Minute::at(1_786_968_720);
+    let now = autosre_domain::Minute::at(1_786_968_720);
     assert_eq!(agent.store.mutes(now, 10).await.unwrap().len(), 1);
 }
 
@@ -745,7 +749,7 @@ async fn refuses_to_mute_forever() {
     agent.mute(id, "100000", &cookie).await;
     // Час ставит веб-морда по своим часам, поэтому и мерить надо по ним же:
     // с прибитой к коду отметкой этот тест протухал на следующие сутки.
-    let now = sre_domain::Minute::of(chrono::Utc::now());
+    let now = autosre_domain::Minute::of(chrono::Utc::now());
     let until = agent.store.mutes(now, 10).await.unwrap()[0].until;
     assert!(until.stamp() - now.stamp() <= 91 * 24 * 60 * 60);
 }
@@ -774,7 +778,7 @@ async fn lifts_a_mute_before_its_time() {
     let id = incident(&agent).await;
     let cookie = agent.enter("duty", SECRET).await.expect("вход не удался");
     agent.mute(id, "7", &cookie).await;
-    let now = sre_domain::Minute::at(1_786_968_720);
+    let now = autosre_domain::Minute::at(1_786_968_720);
     let mute = agent.store.mutes(now, 10).await.unwrap()[0].id;
     Agent::client()
         .post(agent.at(&format!("/mute/{mute}/lift")))
@@ -872,7 +876,7 @@ async fn shows_the_shelf_of_reports() {
     agent
         .store
         .file(
-            sre_store::Filing {
+            autosre_store::Filing {
                 kind: "daily",
                 name: "2026-08-16",
                 title: "Сутки 2026-08-16",
@@ -880,7 +884,7 @@ async fn shows_the_shelf_of_reports() {
                 body: "# Сутки\n\n## Инциденты\n\nНи одного за сутки.",
                 whole: true,
             },
-            sre_domain::Minute::at(1_786_968_660),
+            autosre_domain::Minute::at(1_786_968_660),
         )
         .await
         .unwrap();
@@ -900,7 +904,7 @@ async fn opens_a_report() {
     agent
         .store
         .file(
-            sre_store::Filing {
+            autosre_store::Filing {
                 kind: "daily",
                 name: "2026-08-16",
                 title: "Сутки 2026-08-16",
@@ -908,7 +912,7 @@ async fn opens_a_report() {
                 body: "Ни одного за сутки",
                 whole: true,
             },
-            sre_domain::Minute::at(1_786_968_660),
+            autosre_domain::Minute::at(1_786_968_660),
         )
         .await
         .unwrap();
@@ -944,14 +948,14 @@ async fn keeps_the_reports_from_a_stranger() {
 #[tokio::test]
 async fn shows_what_the_agent_watches() {
     let agent = Agent::start().await;
-    let at = sre_domain::Minute::at(1_786_968_660);
-    let stream = sre_domain::Stream::new("{host=\"node-01\",service=\"orders-api\"}");
+    let at = autosre_domain::Minute::at(1_786_968_660);
+    let stream = autosre_domain::Stream::new("{host=\"node-01\",service=\"orders-api\"}");
     agent
         .store
         .save(
             "logs",
-            sre_domain::Span::single(at),
-            vec![sre_domain::Bucket::counted(stream, at, 7.0)],
+            autosre_domain::Span::single(at),
+            vec![autosre_domain::Bucket::counted(stream, at, 7.0)],
         )
         .await
         .unwrap();
@@ -979,7 +983,7 @@ async fn shows_how_long_it_took_to_notice() {
     let agent = Agent::start().await;
     agent.shared.metrics().detected(240);
     let page = agent.get("/metrics").await.text().await.unwrap();
-    assert!(page.contains("sre_detection_seconds_bucket{le=\"300\"} 1"));
+    assert!(page.contains("autosre_detection_seconds_bucket{le=\"300\"} 1"));
 }
 
 #[tokio::test]
@@ -987,7 +991,7 @@ async fn leaves_a_slow_detection_out_of_the_quick_buckets() {
     let agent = Agent::start().await;
     agent.shared.metrics().detected(1200);
     let page = agent.get("/metrics").await.text().await.unwrap();
-    assert!(page.contains("sre_detection_seconds_bucket{le=\"300\"} 0"));
+    assert!(page.contains("autosre_detection_seconds_bucket{le=\"300\"} 0"));
 }
 
 #[tokio::test]
@@ -997,7 +1001,7 @@ async fn counts_every_detection_whatever_it_took() {
         agent.shared.metrics().detected(seconds);
     }
     let page = agent.get("/metrics").await.text().await.unwrap();
-    assert!(page.contains("sre_detection_seconds_count 3"));
+    assert!(page.contains("autosre_detection_seconds_count 3"));
 }
 
 #[tokio::test]
@@ -1005,7 +1009,7 @@ async fn shows_how_long_it_took_to_explain() {
     let agent = Agent::start().await;
     agent.shared.metrics().explained(700);
     let page = agent.get("/metrics").await.text().await.unwrap();
-    assert!(page.contains("sre_conclusion_seconds_bucket{le=\"900\"} 1"));
+    assert!(page.contains("autosre_conclusion_seconds_bucket{le=\"900\"} 1"));
 }
 
 #[tokio::test]
@@ -1013,7 +1017,7 @@ async fn drops_a_measurement_of_a_clock_that_went_backwards() {
     let agent = Agent::start().await;
     agent.shared.metrics().detected(-60);
     let page = agent.get("/metrics").await.text().await.unwrap();
-    assert!(page.contains("sre_detection_seconds_count 0"));
+    assert!(page.contains("autosre_detection_seconds_count 0"));
 }
 
 #[tokio::test]
@@ -1049,7 +1053,7 @@ async fn taught(agent: &Agent, incident: Option<i64>, ask: &str) -> i64 {
     agent
         .store
         .learn(
-            &sre_store::Lesson {
+            &autosre_store::Lesson {
                 kind: "conclusion".to_owned(),
                 model: "поддельная".to_owned(),
                 incident,
@@ -1059,7 +1063,7 @@ async fn taught(agent: &Agent, incident: Option<i64>, ask: &str) -> i64 {
                 ask: ask.to_owned(),
                 answer: "{\"cause\":\"апстрим молчит\"}".to_owned(),
             },
-            sre_domain::Minute::at(1_786_968_660),
+            autosre_domain::Minute::at(1_786_968_660),
         )
         .await
         .unwrap()
@@ -1151,7 +1155,7 @@ async fn keeps_the_numbers_the_corpus_is_learned_from() {
 
 /// Отсеянное отклонение: то, о чём агент решил промолчать.
 async fn dropped(agent: &Agent) -> i64 {
-    use sre_domain::{Detector, Deviation, Kind, Minute, Stream, Thresholds};
+    use autosre_domain::{Detector, Deviation, Kind, Minute, Stream, Thresholds};
     let at = Minute::of(chrono::Utc::now()).back(30);
     let stream = Stream::new("{host=\"node-01\",service=\"zabbix-proxy\"}");
     let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
@@ -1203,7 +1207,7 @@ async fn takes_the_word_that_the_agent_kept_quiet_in_vain() {
         .send()
         .await
         .expect("запрос не дошёл");
-    let now = sre_domain::Minute::of(chrono::Utc::now());
+    let now = autosre_domain::Minute::of(chrono::Utc::now());
     let sifted = agent.store.sifts(now.back(24 * 60), now, 10).await.unwrap();
     assert_eq!(sifted[0].verdict, Some(false));
 }
@@ -1221,7 +1225,7 @@ async fn counts_a_wrong_silence_apart_from_everything_else() {
         .await
         .expect("запрос не дошёл");
     let page = agent.get("/metrics").await.text().await.unwrap();
-    assert!(page.contains("sre_sifted_wrong_total 1"));
+    assert!(page.contains("autosre_sifted_wrong_total 1"));
 }
 
 #[tokio::test]

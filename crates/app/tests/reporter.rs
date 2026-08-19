@@ -2,14 +2,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use autosre_app::config::{Incidents, Knowledge};
+use autosre_app::metrics::Metrics;
+use autosre_app::reporter::{Reporter, daily, single, weekly};
+use autosre_domain::{Detector, Deviation, Kind, Minute, Service, Signature, Stream, Thresholds};
+use autosre_model::{Model, Settings};
+use autosre_store::Store;
 use axum::Router;
 use axum::routing::post;
-use sre_app::config::{Incidents, Knowledge};
-use sre_app::metrics::Metrics;
-use sre_app::reporter::{Reporter, daily, single, weekly};
-use sre_domain::{Detector, Deviation, Kind, Minute, Service, Signature, Stream, Thresholds};
-use sre_model::{Model, Settings};
-use sre_store::Store;
 use tempfile::TempDir;
 
 /// Поддельная модель: всегда пишет одну и ту же общую картину.
@@ -30,7 +30,7 @@ impl Desk {
     async fn open() -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
         let knowledge = TempDir::new().expect("каталог знаний не создан");
-        let store = Store::open(&directory.path().join("sre.db")).expect("база не открыта");
+        let store = Store::open(&directory.path().join("autosre.db")).expect("база не открыта");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("порт не занят");

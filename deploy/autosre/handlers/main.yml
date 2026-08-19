@@ -1,6 +1,6 @@
 ---
 - name: Пересобрать агента
   community.docker.docker_compose_v2:
-    project_src: /opt/docker/sreagent
+    project_src: /opt/docker/autosre
     build: always
     state: restarted

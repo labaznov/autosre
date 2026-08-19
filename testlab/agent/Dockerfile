@@ -4,14 +4,14 @@ RUN apk add --no-cache build-base
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --release --bin sreagent
+RUN cargo build --release --bin autosre
 
 FROM alpine:3.22
 RUN apk add --no-cache git \
  && adduser -D -u 10001 sre \
- && mkdir -p /opt/data/sreagent \
- && chown sre /opt/data/sreagent
-COPY --from=build /src/target/release/sreagent /usr/local/bin/sreagent
+ && mkdir -p /opt/data/autosre \
+ && chown sre /opt/data/autosre
+COPY --from=build /src/target/release/autosre /usr/local/bin/autosre
 USER sre
 EXPOSE 8096
-ENTRYPOINT ["/usr/local/bin/sreagent"]
+ENTRYPOINT ["/usr/local/bin/autosre"]

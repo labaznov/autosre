@@ -3,12 +3,12 @@
 # Здесь всё, что описывает поведение. Ключи доступа сюда не попадают никогда —
 # они приходят из окружения (ADR-0025):
 #
-#   SREAGENT_MODEL_KEY       ключ LiteLLM
-#   SREAGENT_SESSION_KEY     ключ подписи сессий веб-морды
-#   SREAGENT_LOGS_PASSWORD   пароль VictoriaLogs, если он нужен
+#   AUTOSRE_MODEL_KEY       ключ LiteLLM
+#   AUTOSRE_SESSION_KEY     ключ подписи сессий веб-морды
+#   AUTOSRE_LOGS_PASSWORD   пароль VictoriaLogs, если он нужен
 
 bind = "0.0.0.0:8096"
-database = "/opt/data/sreagent/sre.db"
+database = "/opt/data/autosre/autosre.db"
 
 [logs]
 url = "http://192.0.2.12:9428"
@@ -16,7 +16,7 @@ username = "admin"
 timeout = "60s"
 error_pattern = "i(error*) OR i(exception*) OR i(panic*) OR i(fatal*) OR i(traceback*)"
 # Собственные потоки агента. Без них он находит сам себя и разбирает сам себя.
-self_streams = ['{container="sreagent"}']
+self_streams = ['{container="autosre"}']
 
 [metrics]
 url = "http://192.0.2.11:8428"
@@ -32,7 +32,7 @@ select = [
 ]
 
 # Модель. Здесь только адрес и повадки; ключ доступа приходит из окружения
-# переменной SREAGENT_MODEL_KEY и в файле не появляется никогда (ADR-0025).
+# переменной AUTOSRE_MODEL_KEY и в файле не появляется никогда (ADR-0025).
 [model]
 # Корень OpenAI-совместимого API. Агент сам допишет `v1/chat/completions`.
 #
@@ -102,9 +102,9 @@ ratio = 3.0
 
 [[account]]
 login = "duty"
-# Хеш пароля. Получить: sreagent hash <пароль>. Здесь лежит хеш от `sreagent-lab`
+# Хеш пароля. Получить: autosre hash <пароль>. Здесь лежит хеш от `autosre-lab`
 # — пароля лаборатории, записанного открыто. На стенде подставьте свой.
-password = "$argon2id$v=19$m=19456,t=2,p=1$N37Zjt7tGuTCu2B+BSpYRg$XeW5g91ZGp+auvy/iHsxYZVjWU4AtGqpmMudBuLJNHM"
+password = "$argon2id$v=19$m=19456,t=2,p=1$O9GHrJc2UKEgDwzhQzmqiQ$aFf+x9lWyTDqf3FG9HSSPvbmYJVtpkDq4ANhjyMYx/c"
 
 [incidents]
 # Из каких меток селектора берётся имя сервиса, в порядке предпочтения.
@@ -130,7 +130,7 @@ chunk = "1h"
 
 [digging]
 # Каталог скиллов в рабочей копии репозитория знаний.
-skills = "/opt/data/sreagent/knowledge/skills"
+skills = "/opt/data/autosre/knowledge/skills"
 parallel = 4
 # Сколько раз модель может попросить добрать данные.
 steps = 3
@@ -145,9 +145,9 @@ answer = "1d"
 [knowledge]
 # Рабочая копия репозитория знаний. Заметки правит человек, агент только
 # читает; черновики и отчёты пишет агент, а принимает их человек.
-notes = "/opt/data/sreagent/knowledge/notes"
-drafts = "/opt/data/sreagent/knowledge/drafts"
-reports = "/opt/data/sreagent/knowledge/reports"
+notes = "/opt/data/autosre/knowledge/notes"
+drafts = "/opt/data/autosre/knowledge/drafts"
+reports = "/opt/data/autosre/knowledge/reports"
 # Как часто перечитывать каталог: правку заметки агент обязан заметить без
 # перезапуска.
 refresh = "5m"

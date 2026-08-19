@@ -16,7 +16,7 @@ use sha2::Sha256;
 use crate::config::Account;
 
 /// Имя куки с сессией.
-pub const COOKIE: &str = "sreagent";
+pub const COOKIE: &str = "autosre";
 
 /// Сколько живёт сессия.
 const LIFE: Duration = Duration::from_hours(12);

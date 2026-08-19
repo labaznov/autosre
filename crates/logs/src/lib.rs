@@ -10,10 +10,10 @@ pub mod query;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use autosre_domain::{Bucket, Minute, Span, Stream};
+use autosre_source::{Source, SourceError};
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
-use sre_domain::{Bucket, Minute, Span, Stream};
-use sre_source::{Source, SourceError};
 use url::Url;
 
 pub use query::{Filter, FilterError};

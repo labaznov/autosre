@@ -6,23 +6,23 @@
 # Здесь всё, что описывает поведение. Ключи доступа сюда не попадают никогда —
 # они приходят из окружения (ADR-0025):
 #
-#   SREAGENT_MODEL_KEY       ключ LiteLLM
-#   SREAGENT_SESSION_KEY     ключ подписи сессий веб-морды
-#   SREAGENT_LOGS_PASSWORD   пароль VictoriaLogs, если он нужен
+#   AUTOSRE_MODEL_KEY       ключ LiteLLM
+#   AUTOSRE_SESSION_KEY     ключ подписи сессий веб-морды
+#   AUTOSRE_LOGS_PASSWORD   пароль VictoriaLogs, если он нужен
 
 bind = "0.0.0.0:8096"
-database = "/opt/data/sreagent/sre.db"
+database = "/opt/data/autosre/autosre.db"
 
 [logs]
-url = "{{ sreagent_logs_url }}"
-username = "{{ sreagent_logs_username }}"
+url = "{{ autosre_logs_url }}"
+username = "{{ autosre_logs_username }}"
 timeout = "60s"
 error_pattern = "i(error*) OR i(exception*) OR i(panic*) OR i(fatal*) OR i(traceback*)"
 # Собственные потоки агента. Без них он находит сам себя и разбирает сам себя.
-self_streams = ['{{ sreagent_self_streams }}']
+self_streams = ['{{ autosre_self_streams }}']
 
 [metrics]
-url = "{{ sreagent_metrics_url }}"
+url = "{{ autosre_metrics_url }}"
 timeout = "30s"
 # Правила отбора наблюдаемых серий: универсальный набор признаков здоровья.
 select = [
@@ -35,8 +35,8 @@ select = [
 ]
 
 [model]
-url = "{{ sreagent_model_url }}"
-name = "{{ sreagent_model_name }}"
+url = "{{ autosre_model_url }}"
+name = "{{ autosre_model_name }}"
 timeout = "180s"
 max_tokens = 900
 temperature = 0.2
@@ -79,7 +79,7 @@ minimum = 15
 score = 4.0
 ratio = 3.0
 
-{% for account in sreagent_accounts %}
+{% for account in autosre_accounts %}
 [[account]]
 login = "{{ account.login }}"
 password = "{{ account.password }}"
@@ -100,7 +100,7 @@ chunk = "1h"
 
 [digging]
 # Каталог скиллов в рабочей копии репозитория знаний.
-skills = "/opt/data/sreagent/knowledge/skills"
+skills = "/opt/data/autosre/knowledge/skills"
 parallel = 4
 # Сколько раз модель может попросить добрать данные.
 steps = 3
@@ -109,15 +109,15 @@ wider = "1h"
 patience = "15m"
 # Как часто очередь оглядывается и сколько заявка ждёт ответа дежурного.
 tick = "1m"
-answer = "{{ sreagent_answer }}"
+answer = "{{ autosre_answer }}"
 
 [knowledge]
 # Рабочая копия репозитория знаний: заметки правят люди, агент только читает.
-notes = "/opt/data/sreagent/knowledge/notes"
+notes = "/opt/data/autosre/knowledge/notes"
 # Куда агент пишет черновики заметок и с какой уверенности берётся за них.
-drafts = "/opt/data/sreagent/knowledge/drafts"
+drafts = "/opt/data/autosre/knowledge/drafts"
 # Куда ложатся отчёты: их пишет агент, люди только читают.
-reports = "/opt/data/sreagent/knowledge/reports"
+reports = "/opt/data/autosre/knowledge/reports"
 worth = 0.5
 refresh = "5m"
 # Сколько заметок уходит в досье расследования.
@@ -127,10 +127,10 @@ recall = 3
 # Сбор живых данных: по записи на каждый заход в модель, для подбора порогов и
 # дообучения ([ADR-0027](../../docs/adr/0027-live-corpus.md)). Выгрузка —
 # `GET /api/corpus`, построчным JSON, за входом.
-collect = {{ sreagent_corpus | lower }}
+collect = {{ autosre_corpus | lower }}
 # Отдавать ли сырые строки. По умолчанию адреса, идентификаторы и числа
 # маскируются: корпус уезжает из контура.
-raw = {{ sreagent_corpus_raw | lower }}
+raw = {{ autosre_corpus_raw | lower }}
 
 [queue]
 parallel = 4

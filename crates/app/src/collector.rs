@@ -9,10 +9,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use autosre_domain::{Bucket, Hour, Minute, Span};
+use autosre_source::Source;
+use autosre_store::Store;
 use chrono::Utc;
-use sre_domain::{Bucket, Hour, Minute, Span};
-use sre_source::Source;
-use sre_store::Store;
 
 use crate::config::{Collector, Retention};
 use crate::metrics::Metrics;

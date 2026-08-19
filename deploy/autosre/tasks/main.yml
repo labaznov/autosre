@@ -9,15 +9,15 @@
 - name: Проверить, что ключи заданы
   ansible.builtin.assert:
     that:
-      - sreagent_model_key | length > 0
-      - sreagent_session_key | length > 0
-      - sreagent_accounts | length > 0
+      - autosre_model_key | length > 0
+      - autosre_session_key | length > 0
+      - autosre_accounts | length > 0
     fail_msg: >-
-      Нужны sreagent_model_key, sreagent_session_key и хотя бы одна учётная
+      Нужны autosre_model_key, autosre_session_key и хотя бы одна учётная
       запись. Значений по умолчанию у ключей нет: без них агент не стартует.
-      Хеш пароля считается командой `sreagent hash <пароль>`.
+      Хеш пароля считается командой `autosre hash <пароль>`.
 
-# Права 0750: в /opt/docker/sreagent лежат настройки и .env с ключами, а в
+# Права 0750: в /opt/docker/autosre лежат настройки и .env с ключами, а в
 # /opt/data — база с содержимым прод-логов. Читать это посторонним на хосте
 # незачем.
 - name: Создать каталоги
@@ -27,27 +27,27 @@
     owner: "10001"
     mode: "0750"
   loop:
-    - /opt/docker/sreagent
-    - /opt/docker/sreagent/src
-    - /opt/data/sreagent
-    - /opt/data/sreagent/knowledge
+    - /opt/docker/autosre
+    - /opt/docker/autosre/src
+    - /opt/data/autosre
+    - /opt/data/autosre/knowledge
 
 # От имени того же uid: агент коммитит в эту копию приёмку черновиков, и
 # каталог, созданный root, сделал бы это невозможным.
 - name: Забрать рабочую копию репозитория знаний
   ansible.builtin.git:
-    repo: "{{ sreagent_knowledge_repo }}"
-    dest: /opt/data/sreagent/knowledge
-    version: "{{ sreagent_knowledge_branch }}"
+    repo: "{{ autosre_knowledge_repo }}"
+    dest: /opt/data/autosre/knowledge
+    version: "{{ autosre_knowledge_branch }}"
   become_user: "#10001"
-  when: sreagent_knowledge_repo | length > 0
+  when: autosre_knowledge_repo | length > 0
 
 # Исходники копируются на хост и собираются там же: своего registry нет, а
 # тащить образ ниоткуда неоткуда (ADR-0023). Сборка требует сети до crates.io.
 - name: Скопировать исходники агента
   ansible.posix.synchronize:
-    src: "{{ sreagent_source }}/"
-    dest: /opt/docker/sreagent/src/
+    src: "{{ autosre_source }}/"
+    dest: /opt/docker/autosre/src/
     delete: true
     rsync_opts:
       - "--exclude=target"
@@ -56,27 +56,27 @@
 
 - name: Отрендерить настройки
   ansible.builtin.template:
-    src: sreagent.toml.j2
-    dest: /opt/docker/sreagent/sreagent.toml
+    src: autosre.toml.j2
+    dest: /opt/docker/autosre/autosre.toml
     mode: "0640"
   notify: Пересобрать агента
 
 - name: Отрендерить секреты
   ansible.builtin.template:
     src: env.j2
-    dest: /opt/docker/sreagent/.env
+    dest: /opt/docker/autosre/.env
     mode: "0600"
   notify: Пересобрать агента
 
 - name: Отрендерить compose
   ansible.builtin.template:
     src: docker-compose.yml.j2
-    dest: /opt/docker/sreagent/docker-compose.yml
+    dest: /opt/docker/autosre/docker-compose.yml
     mode: "0640"
   notify: Пересобрать агента
 
 - name: Поднять агента
   community.docker.docker_compose_v2:
-    project_src: /opt/docker/sreagent
+    project_src: /opt/docker/autosre
     build: policy
     state: present

@@ -11,12 +11,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use autosre_domain::{Incident, Minute, Span};
+use autosre_model::{Model, prompt};
+use autosre_skills::Skill;
+use autosre_source::Source;
+use autosre_store::Store;
 use chrono::Utc;
-use sre_domain::{Incident, Minute, Span};
-use sre_model::{Model, prompt};
-use sre_skills::Skill;
-use sre_source::Source;
-use sre_store::Store;
 use tokio::sync::Semaphore;
 
 use crate::config::{Digging, Incidents, Knowledge};
@@ -239,13 +239,13 @@ async fn investigate(digger: &Digger, incident: &Incident) {
 async fn jot(
     digger: &Digger,
     incident: &Incident,
-    conclusion: &sre_model::Conclusion,
+    conclusion: &autosre_model::Conclusion,
     note: Option<&str>,
 ) {
     if note.is_some() || conclusion.confidence < digger.knowledge.worth {
         return;
     }
-    let draft = sre_knowledge::Draft {
+    let draft = autosre_knowledge::Draft {
         name: format!(
             "{}-{}-{}",
             Utc::now().format("%Y-%m-%d"),
@@ -270,10 +270,11 @@ async fn jot(
         ),
     };
     let drafts = digger.knowledge.drafts.clone();
-    let written = tokio::task::spawn_blocking(move || sre_knowledge::draft::write(&drafts, &draft))
-        .await
-        .ok()
-        .and_then(Result::ok);
+    let written =
+        tokio::task::spawn_blocking(move || autosre_knowledge::draft::write(&drafts, &draft))
+            .await
+            .ok()
+            .and_then(Result::ok);
     let Some(path) = written else {
         tracing::warn!(incident = incident.id, "черновик заметки не записан");
         return;
@@ -360,7 +361,7 @@ fn clipped(text: &str, limit: usize) -> String {
 /// Имя проверяется по индексу: модель называет то, что видела в досье, но
 /// «видела» и «перепечатала верно» — разные вещи, а ссылка в карточке обязана
 /// вести на существующую заметку.
-async fn leaned(digger: &Digger, conclusion: &sre_model::Conclusion) -> Option<String> {
+async fn leaned(digger: &Digger, conclusion: &autosre_model::Conclusion) -> Option<String> {
     let named = conclusion.note.as_deref()?.trim();
     if named.is_empty() {
         return None;
@@ -387,7 +388,7 @@ async fn inquire(
     digger: &Digger,
     incident: &Incident,
     investigation: i64,
-    conclusion: &sre_model::Conclusion,
+    conclusion: &autosre_model::Conclusion,
 ) -> bool {
     let host = conclusion
         .host
@@ -400,7 +401,7 @@ async fn inquire(
         );
         return false;
     };
-    let inquiry = match sre_domain::Inquiry::new(&host, command, &conclusion.advice) {
+    let inquiry = match autosre_domain::Inquiry::new(&host, command, &conclusion.advice) {
         Ok(inquiry) => inquiry,
         Err(refused) => {
             tracing::warn!(incident = incident.id, %refused, "заявка отклонена");
@@ -436,15 +437,15 @@ async fn finish(
     digger: &Digger,
     incident: &Incident,
     investigation: i64,
-    conclusion: &sre_model::Conclusion,
+    conclusion: &autosre_model::Conclusion,
 ) {
     let now = Minute::of(Utc::now());
     let note = leaned(digger, conclusion).await;
-    let severity = sre_domain::Severity::of(conclusion.severity.as_deref().unwrap_or_default());
+    let severity = autosre_domain::Severity::of(conclusion.severity.as_deref().unwrap_or_default());
     match digger
         .store
         .conclude(
-            &sre_store::Reached {
+            &autosre_store::Reached {
                 investigation,
                 cause: &conclusion.cause,
                 confidence: conclusion.confidence,
@@ -486,8 +487,8 @@ fn pick<'a>(digger: &'a Digger, incident: &Incident) -> Option<&'a Skill> {
 }
 
 /// Отклонение, каким его видит скилл: инцидент несёт те же поля.
-fn about(incident: &Incident) -> sre_domain::Deviation {
-    sre_domain::Deviation {
+fn about(incident: &Incident) -> autosre_domain::Deviation {
+    autosre_domain::Deviation {
         source: incident.source.clone(),
         stream: incident.stream.clone(),
         horizon: horizon(incident),
@@ -725,7 +726,7 @@ fn join(lines: &[String]) -> String {
     if lines.is_empty() {
         return "(пусто)".to_owned();
     }
-    sre_domain::signature::groups(lines, 7)
+    autosre_domain::signature::groups(lines, 7)
         .iter()
         .map(|group| {
             format!(

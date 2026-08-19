@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use sre_app::config::{Config, ConfigError, Env};
+use autosre_app::config::{Config, ConfigError, Env};
 use tempfile::TempDir;
 
 /// Файл настроек во временном каталоге, живущий столько же, сколько каталог.
@@ -12,7 +12,7 @@ struct Settings {
 impl Settings {
     fn of(body: &str) -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
-        let path = directory.path().join("sreagent.toml");
+        let path = directory.path().join("autosre.toml");
         std::fs::write(&path, body).expect("файл настроек не записан");
         Self {
             path,
@@ -39,8 +39,8 @@ impl Env for Keys {
 
 fn full() -> Keys {
     Keys(vec![
-        ("SREAGENT_MODEL_KEY", "sk-Q7f3-ephemeral"),
-        ("SREAGENT_SESSION_KEY", "9f3a1c7e0b"),
+        ("AUTOSRE_MODEL_KEY", "sk-Q7f3-ephemeral"),
+        ("AUTOSRE_SESSION_KEY", "9f3a1c7e0b"),
     ])
 }
 
@@ -83,7 +83,7 @@ fn keeps_the_own_streams_of_the_agent() {
         r#"
 [logs]
 url = "http://192.0.2.12:9428"
-self_streams = ['{container="sreagent"}', '{container="litellm"}']
+self_streams = ['{container="autosre"}', '{container="litellm"}']
 
 [metrics]
 url = "http://192.0.2.11:8428"
@@ -107,20 +107,20 @@ period = "1m"
 #[test]
 fn refuses_to_start_without_the_model_key() {
     let settings = Settings::of(ENOUGH);
-    let keys = Keys(vec![("SREAGENT_SESSION_KEY", "9f3a1c7e0b")]);
+    let keys = Keys(vec![("AUTOSRE_SESSION_KEY", "9f3a1c7e0b")]);
     assert!(matches!(
         settings.read(&keys).unwrap_err(),
-        ConfigError::Missing("SREAGENT_MODEL_KEY")
+        ConfigError::Missing("AUTOSRE_MODEL_KEY")
     ));
 }
 
 #[test]
 fn refuses_to_start_without_the_session_key() {
     let settings = Settings::of(ENOUGH);
-    let keys = Keys(vec![("SREAGENT_MODEL_KEY", "sk-Q7f3-ephemeral")]);
+    let keys = Keys(vec![("AUTOSRE_MODEL_KEY", "sk-Q7f3-ephemeral")]);
     assert!(matches!(
         settings.read(&keys).unwrap_err(),
-        ConfigError::Missing("SREAGENT_SESSION_KEY")
+        ConfigError::Missing("AUTOSRE_SESSION_KEY")
     ));
 }
 
@@ -128,12 +128,12 @@ fn refuses_to_start_without_the_session_key() {
 fn treats_a_blank_key_as_absent() {
     let settings = Settings::of(ENOUGH);
     let keys = Keys(vec![
-        ("SREAGENT_MODEL_KEY", "   "),
-        ("SREAGENT_SESSION_KEY", "9f3a1c7e0b"),
+        ("AUTOSRE_MODEL_KEY", "   "),
+        ("AUTOSRE_SESSION_KEY", "9f3a1c7e0b"),
     ]);
     assert!(matches!(
         settings.read(&keys).unwrap_err(),
-        ConfigError::Missing("SREAGENT_MODEL_KEY")
+        ConfigError::Missing("AUTOSRE_MODEL_KEY")
     ));
 }
 
@@ -224,7 +224,7 @@ fn complains_about_a_missing_file() {
 
 #[test]
 fn reads_the_shipped_example() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/sreagent.toml");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/autosre.toml");
     assert!(Config::read(&path, &full()).unwrap().unknown.is_empty());
 }
 

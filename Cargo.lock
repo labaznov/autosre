@@ -98,6 +98,143 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "autosre-app"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "askama",
+ "async-trait",
+ "autosre-domain",
+ "autosre-knowledge",
+ "autosre-logs",
+ "autosre-metrics",
+ "autosre-model",
+ "autosre-skills",
+ "autosre-source",
+ "autosre-store",
+ "axum",
+ "base64",
+ "chrono",
+ "hmac",
+ "humantime-serde",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
+name = "autosre-domain"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "regex",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "autosre-knowledge"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "autosre-logs"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "autosre-domain",
+ "autosre-source",
+ "axum",
+ "chrono",
+ "reqwest",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "autosre-metrics"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "autosre-domain",
+ "autosre-source",
+ "axum",
+ "reqwest",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "autosre-model"
+version = "0.1.0"
+dependencies = [
+ "autosre-domain",
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "autosre-skills"
+version = "0.1.0"
+dependencies = [
+ "autosre-domain",
+ "regex",
+ "serde",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "autosre-source"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "autosre-domain",
+ "thiserror",
+]
+
+[[package]]
+name = "autosre-store"
+version = "0.1.0"
+dependencies = [
+ "autosre-domain",
+ "chrono",
+ "rusqlite",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "axum"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1312,143 +1449,6 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "sre-app"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "askama",
- "async-trait",
- "axum",
- "base64",
- "chrono",
- "hmac",
- "humantime-serde",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "sre-domain",
- "sre-knowledge",
- "sre-logs",
- "sre-metrics",
- "sre-model",
- "sre-skills",
- "sre-source",
- "sre-store",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
-name = "sre-domain"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "regex",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "sre-knowledge"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_yaml_ng",
- "tempfile",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "sre-logs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "chrono",
- "reqwest",
- "serde_json",
- "sre-domain",
- "sre-source",
- "thiserror",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "sre-metrics"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "reqwest",
- "serde_json",
- "sre-domain",
- "sre-source",
- "thiserror",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "sre-model"
-version = "0.1.0"
-dependencies = [
- "axum",
- "reqwest",
- "serde",
- "serde_json",
- "sre-domain",
- "thiserror",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "sre-skills"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "serde_yaml_ng",
- "sre-domain",
- "tempfile",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "sre-source"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "sre-domain",
- "thiserror",
-]
-
-[[package]]
-name = "sre-store"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "rusqlite",
- "sre-domain",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]

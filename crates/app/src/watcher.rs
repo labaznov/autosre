@@ -14,10 +14,10 @@
 
 use std::sync::Arc;
 
+use autosre_domain::{Detector, Deviation, Minute, Thresholds};
+use autosre_source::Source;
+use autosre_store::Store;
 use chrono::Utc;
-use sre_domain::{Detector, Deviation, Minute, Thresholds};
-use sre_source::Source;
-use sre_store::Store;
 
 use crate::config::Horizon;
 use crate::metrics::Metrics;

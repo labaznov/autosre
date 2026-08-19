@@ -10,9 +10,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use autosre_domain::{Deviation, Stream};
 use regex::Regex;
 use serde::Deserialize;
-use sre_domain::{Deviation, Stream};
 
 /// Отказы разбора скилла.
 #[derive(Debug, thiserror::Error)]

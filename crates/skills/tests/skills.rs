@@ -1,5 +1,5 @@
-use sre_domain::{Detector, Deviation, Kind, Minute, Stream, Thresholds};
-use sre_skills::{Skill, read};
+use autosre_domain::{Detector, Deviation, Kind, Minute, Stream, Thresholds};
+use autosre_skills::{Skill, read};
 use tempfile::TempDir;
 
 /// Скилл, годный во всём: от него отталкиваются проверки.
@@ -149,7 +149,7 @@ fn ignores_files_that_are_not_skills() {
 
 #[test]
 fn fills_the_window_into_a_query() {
-    let filled = sre_skills::fill(
+    let filled = autosre_skills::fill(
         "_time:[{start}, {end}) {stream}",
         &wifi(),
         "orders-api",
@@ -162,7 +162,7 @@ fn fills_the_window_into_a_query() {
 #[test]
 fn keeps_a_stray_pipe_out_of_a_query() {
     let deviation = deviation("logs", "15m", "{service=\"a|drop\"}");
-    let filled = sre_skills::fill("{stream}", &deviation, "a", "x", "y");
+    let filled = autosre_skills::fill("{stream}", &deviation, "a", "x", "y");
     assert!(!filled.contains('|'));
 }
 

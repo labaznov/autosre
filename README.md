@@ -1,4 +1,4 @@
-# sreagent
+# autosre
 
 [![Проверки](https://github.com/labaznov/autosre/actions/workflows/check.yml/badge.svg)](https://github.com/labaznov/autosre/actions/workflows/check.yml)
 [![Лицензия MIT](https://img.shields.io/badge/лицензия-MIT-informational)](LICENSE)
@@ -15,7 +15,7 @@
 > Rust 2024, ten crates, 417 tests, `clippy::pedantic` clean. Works end to end
 > on the bundled test lab; **not yet calibrated on production data**. Try it
 > with `cd testlab && make up && make agent`, then open
-> `http://127.0.0.1:8096/` and log in as `duty` / `sreagent-lab`.
+> `http://127.0.0.1:8096/` and log in as `duty` / `autosre-lab`.
 >
 > Everything else — code comments, docs, and the web UI — is in Russian, and
 > that is deliberate: this is a tool for a Russian-speaking on-call team.
@@ -29,9 +29,6 @@
 **Агент не чинит и не ходит на хосты.** Он сокращает время до обнаружения и
 время до понимания. Всё, чего он не может увидеть сам, он просит выполнить
 человека и ждёт ответа.
-
-Репозиторий зовётся `autosre`, бинарь и крейты — `sreagent`: первое имя
-продукта, второе — команды, которую запускают.
 
 ## Что он делает
 
@@ -67,14 +64,14 @@ make up        # VictoriaLogs, VictoriaMetrics, генератор потока,
 make agent     # агент поверх них
 ```
 
-Веб-морда — `http://127.0.0.1:8096/`, вход `duty` / `sreagent-lab`. Живого
+Веб-морда — `http://127.0.0.1:8096/`, вход `duty` / `autosre-lab`. Живого
 инференса в лаборатории нет: проверяется конвейер, а не качество разбора,
 поэтому ответы модели предсказуемы и прогон повторим. Подробности —
 [`testlab/README.md`](testlab/README.md).
 
 ## Развернуть
 
-Роль Ansible в [`deploy/auto-sre/`](deploy/auto-sre/README.md): образ на
+Роль Ansible в [`deploy/autosre/`](deploy/autosre/README.md): образ на
 Alpine, обновление с остановкой, настройки в TOML, секреты из окружения.
 
 ## Документы
@@ -96,8 +93,8 @@ Alpine, обновление с остановкой, настройки в TOML
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | что нужно до установки, расчёт ресурсов, подключение модели, первый день, что открыто наружу, резервное копирование, обновление и откат, разбор отказов |
 | [`docs/DUTY.md`](docs/DUTY.md) | страницы веб-морды, что делает дежурный и что означает каждое действие, как читать карточку, чего от агента не ждать |
 | [`docs/METRICS.md`](docs/METRICS.md) | все 20 метрик с пояснениями, запросы для процентилей приёмки, с чего начать алерты |
-| [`deploy/auto-sre/README.md`](deploy/auto-sre/README.md) | роль Ansible: переменные, запуск, обновление, HTTPS |
-| [`examples/sreagent.toml`](examples/sreagent.toml) | все настройки с пояснениями, годится как образец для стенда |
+| [`deploy/autosre/README.md`](deploy/autosre/README.md) | роль Ansible: переменные, запуск, обновление, HTTPS |
+| [`examples/autosre.toml`](examples/autosre.toml) | все настройки с пояснениями, годится как образец для стенда |
 | [`testlab/README.md`](testlab/README.md) | тестовая лаборатория: что генерируется, какие сценарии, как смотреть |
 
 ### Что и почему построено

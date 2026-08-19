@@ -1,4 +1,4 @@
-name: sreagent-lab
+name: autosre-lab
 
 services:
   victorialogs:
@@ -58,17 +58,17 @@ services:
     build:
       context: ..
       dockerfile: testlab/agent/Dockerfile
-    command: ["/etc/sreagent/sreagent.toml"]
+    command: ["/etc/autosre/autosre.toml"]
     environment:
-      SREAGENT_MODEL_KEY: sk-lab
-      SREAGENT_SESSION_KEY: lab-session-key
-      SREAGENT_LOG: info
+      AUTOSRE_MODEL_KEY: sk-lab
+      AUTOSRE_SESSION_KEY: lab-session-key
+      AUTOSRE_LOG: info
     ports:
       - "8096:8096"
     volumes:
-      - ./sreagent.toml:/etc/sreagent/sreagent.toml:ro
+      - ./autosre.toml:/etc/autosre/autosre.toml:ro
       - ./knowledge:/knowledge
-      - agent:/opt/data/sreagent
+      - agent:/opt/data/autosre
     depends_on:
       - victorialogs
       - model

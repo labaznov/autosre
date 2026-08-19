@@ -1,5 +1,5 @@
 [package]
-name = "sre-skills"
+name = "autosre-skills"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ license.workspace = true
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
 serde.workspace = true
 serde_yaml_ng = "0.10"
-sre-domain = { path = "../domain" }
+autosre-domain = { path = "../domain" }
 thiserror.workspace = true
 tracing.workspace = true
 

@@ -1,5 +1,5 @@
+use autosre_domain::{Hour, Minute, Span, SpanError};
 use chrono::{DateTime, Utc};
-use sre_domain::{Hour, Minute, Span, SpanError};
 
 fn moment(text: &str) -> DateTime<Utc> {
     text.parse().expect("момент времени некорректен")

@@ -1,16 +1,16 @@
 [package]
-name = "sre-app"
+name = "autosre-app"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [lib]
-name = "sre_app"
+name = "autosre_app"
 path = "src/lib.rs"
 
 [[bin]]
-name = "sreagent"
+name = "autosre"
 path = "src/main.rs"
 
 [dependencies]
@@ -25,14 +25,14 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
-sre-domain = { path = "../domain" }
-sre-knowledge = { path = "../knowledge" }
-sre-logs = { path = "../logs" }
-sre-metrics = { path = "../metrics" }
-sre-model = { path = "../model" }
-sre-skills = { path = "../skills" }
-sre-source = { path = "../source" }
-sre-store = { path = "../store" }
+autosre-domain = { path = "../domain" }
+autosre-knowledge = { path = "../knowledge" }
+autosre-logs = { path = "../logs" }
+autosre-metrics = { path = "../metrics" }
+autosre-model = { path = "../model" }
+autosre-skills = { path = "../skills" }
+autosre-source = { path = "../source" }
+autosre-store = { path = "../store" }
 thiserror.workspace = true
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
@@ -41,15 +41,15 @@ url = "2"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt"] }
 
 [dev-dependencies]
-sre-knowledge = { path = "../knowledge" }
+autosre-knowledge = { path = "../knowledge" }
 async-trait = "0.1"
 chrono.workspace = true
-sre-model = { path = "../model" }
-sre-skills = { path = "../skills" }
-sre-source = { path = "../source" }
-sre-store = { path = "../store" }
+autosre-model = { path = "../model" }
+autosre-skills = { path = "../skills" }
+autosre-source = { path = "../source" }
+autosre-store = { path = "../store" }
 argon2 = { version = "0.5", features = ["std"] }
-sre-domain = { path = "../domain" }
+autosre-domain = { path = "../domain" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

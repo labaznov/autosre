@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use sre_knowledge::{Note, read};
+use autosre_knowledge::{Note, read};
 use tempfile::TempDir;
 
 /// Заметка, годная во всём: от неё отталкиваются проверки.
@@ -101,9 +101,12 @@ fn ignores_files_that_are_not_notes() {
 fn sees_a_new_file_in_the_directory() {
     let directory = TempDir::new().expect("временный каталог не создан");
     std::fs::write(directory.path().join("one.md"), PLAIN).expect("заметка не записана");
-    let before = sre_knowledge::touched(directory.path()).unwrap();
+    let before = autosre_knowledge::touched(directory.path()).unwrap();
     std::fs::write(directory.path().join("two.md"), PLAIN).expect("заметка не записана");
-    assert_ne!(sre_knowledge::touched(directory.path()).unwrap(), before);
+    assert_ne!(
+        autosre_knowledge::touched(directory.path()).unwrap(),
+        before
+    );
 }
 
 #[test]

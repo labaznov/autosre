@@ -4,22 +4,22 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use sre_app::config::{Config, Process};
-use sre_app::metrics::Metrics;
-use sre_app::session::Doorman;
-use sre_app::{VERSION, collector, digger, grouper, librarian, reporter, scribe, watcher, web};
-use sre_logs::{Filter, Logs};
-use sre_source::Source;
-use sre_store::Store;
+use autosre_app::config::{Config, Process};
+use autosre_app::metrics::Metrics;
+use autosre_app::session::Doorman;
+use autosre_app::{VERSION, collector, digger, grouper, librarian, reporter, scribe, watcher, web};
+use autosre_logs::{Filter, Logs};
+use autosre_source::Source;
+use autosre_store::Store;
 use tracing_subscriber::EnvFilter;
 
 /// Путь к файлу настроек по умолчанию.
-const CONFIG: &str = "/etc/sreagent/sreagent.toml";
+const CONFIG: &str = "/etc/autosre/autosre.toml";
 
 #[tokio::main]
 async fn main() -> ExitCode {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_env("SREAGENT_LOG").unwrap_or_else(|_| "info".into()))
+        .with_env_filter(EnvFilter::try_from_env("AUTOSRE_LOG").unwrap_or_else(|_| "info".into()))
         .init();
     if let Some(password) = hashing() {
         let Ok(hash) = hash(&password) else {
@@ -38,7 +38,7 @@ async fn main() -> ExitCode {
     }
 }
 
-/// Пароль, который просят захешировать: `sreagent hash <пароль>`.
+/// Пароль, который просят захешировать: `autosre hash <пароль>`.
 ///
 /// Учётку без этого не завести: в конфигурации лежит хеш, а не пароль, и
 /// считать его где-то на стороне — верный способ отправить пароль не туда.
@@ -60,19 +60,19 @@ fn hash(password: &str) -> Result<String, argon2::password_hash::Error> {
 #[derive(Debug, thiserror::Error)]
 enum Failure {
     #[error(transparent)]
-    Config(#[from] sre_app::config::ConfigError),
+    Config(#[from] autosre_app::config::ConfigError),
     #[error("порт не занят: {0}")]
     Bind(#[from] std::io::Error),
     #[error("база наблюдений не открыта: {0}")]
-    Store(#[from] sre_store::StoreError),
+    Store(#[from] autosre_store::StoreError),
     #[error("источник не собран: {0}")]
-    Source(#[from] sre_source::SourceError),
+    Source(#[from] autosre_source::SourceError),
     #[error("шаблон ошибок некорректен: {0}")]
-    Filter(#[from] sre_logs::FilterError),
+    Filter(#[from] autosre_logs::FilterError),
     #[error("адрес источника некорректен: {0}")]
     Address(#[from] url::ParseError),
     #[error("модель не подключена: {0}")]
-    Model(#[from] sre_model::ModelError),
+    Model(#[from] autosre_model::ModelError),
 }
 
 async fn serve() -> Result<(), Failure> {
@@ -98,7 +98,7 @@ async fn serve() -> Result<(), Failure> {
     );
     collector::tidy(&sources, &store, &config.file.retention);
     watcher::watch(&sources, &store, &metrics, &config.file.enabled());
-    let talker = sre_model::Model::new(sre_model::Settings {
+    let talker = autosre_model::Model::new(autosre_model::Settings {
         url: config.file.model.url.parse()?,
         key: config.secrets.model.clone(),
         name: config.file.model.name.clone(),
@@ -120,7 +120,7 @@ async fn serve() -> Result<(), Failure> {
     librarian::learn(&store, &metrics, &config.file.knowledge).await;
     librarian::keep(&store, &metrics, &config.file.knowledge);
 
-    let skills = sre_skills::read(&config.file.digging.skills).unwrap_or_else(|failure| {
+    let skills = autosre_skills::read(&config.file.digging.skills).unwrap_or_else(|failure| {
         tracing::warn!(
             path = %config.file.digging.skills.display(),
             %failure,
@@ -184,7 +184,7 @@ async fn serve() -> Result<(), Failure> {
 /// поэтому дальше по коду они неразличимы.
 fn sources(config: &Config) -> Result<Vec<Arc<dyn Source>>, Failure> {
     let logs: Arc<dyn Source> = Arc::new(Logs::new(
-        &sre_logs::Settings {
+        &autosre_logs::Settings {
             url: config.file.logs.url.parse()?,
             username: config.file.logs.username.clone(),
             password: config.secrets.logs_password.clone(),
@@ -196,12 +196,13 @@ fn sources(config: &Config) -> Result<Vec<Arc<dyn Source>>, Failure> {
             config.file.logs.self_streams.clone(),
         )?,
     )?);
-    let numbers: Arc<dyn Source> = Arc::new(sre_metrics::Metrics::new(&sre_metrics::Settings {
-        url: config.file.metrics.url.parse()?,
-        timeout: config.file.metrics.timeout,
-        select: config.file.metrics.select.clone(),
-        labels: config.file.incidents.service_labels.clone(),
-    })?);
+    let numbers: Arc<dyn Source> =
+        Arc::new(autosre_metrics::Metrics::new(&autosre_metrics::Settings {
+            url: config.file.metrics.url.parse()?,
+            timeout: config.file.metrics.timeout,
+            select: config.file.metrics.select.clone(),
+            labels: config.file.incidents.service_labels.clone(),
+        })?);
     Ok(vec![logs, numbers])
 }
 

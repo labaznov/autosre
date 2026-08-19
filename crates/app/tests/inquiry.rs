@@ -4,18 +4,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use autosre_app::config::{Digging, Incidents};
+use autosre_app::digger::{Digger, dig};
+use autosre_app::metrics::Metrics;
+use autosre_domain::{
+    Bucket, Detector, Deviation, Kind, Minute, Service, Signature, Span, Stream, Thresholds,
+};
+use autosre_model::{Model, Settings};
+use autosre_source::{Source, SourceError};
+use autosre_store::Store;
 use axum::Router;
 use axum::extract::State;
 use axum::routing::post;
-use sre_app::config::{Digging, Incidents};
-use sre_app::digger::{Digger, dig};
-use sre_app::metrics::Metrics;
-use sre_domain::{
-    Bucket, Detector, Deviation, Kind, Minute, Service, Signature, Span, Stream, Thresholds,
-};
-use sre_model::{Model, Settings};
-use sre_source::{Source, SourceError};
-use sre_store::Store;
 use tempfile::TempDir;
 
 /// Скилл, годный для всплеска ошибок на пятнадцати минутах.
@@ -107,7 +107,7 @@ struct Stand {
 impl Stand {
     async fn start(command: &'static str) -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
-        let store = Store::open(&directory.path().join("sre.db")).expect("база не открыта");
+        let store = Store::open(&directory.path().join("autosre.db")).expect("база не открыта");
         let skills = TempDir::new().expect("каталог скиллов не создан");
         std::fs::write(skills.path().join("error-burst.md"), SKILL).expect("скилл не записан");
 
@@ -131,13 +131,13 @@ impl Stand {
             &store,
             &Arc::new(Metrics::new("тест")),
             &model,
-            sre_skills::read(skills.path()).expect("скиллы не прочитаны"),
-            &sre_app::digger::Recipe {
+            autosre_skills::read(skills.path()).expect("скиллы не прочитаны"),
+            &autosre_app::digger::Recipe {
                 digging: &Digging::default()
                     .patient(Duration::from_hours(1))
                     .quick(Duration::from_millis(200)),
                 incidents: &Incidents::default(),
-                knowledge: &sre_app::config::Knowledge::default()
+                knowledge: &autosre_app::config::Knowledge::default()
                     .drafting(directory.path().join("drafts")),
             },
         ));
@@ -170,7 +170,7 @@ impl Stand {
     }
 
     /// Ждёт первой заявки по инциденту.
-    async fn inquiry(&self, incident: i64) -> Option<sre_store::Asked> {
+    async fn inquiry(&self, incident: i64) -> Option<autosre_store::Asked> {
         for _ in 0..100 {
             if let Ok(asked) = self.store.inquiries(incident).await
                 && let Some(first) = asked.into_iter().next_back()
@@ -183,7 +183,7 @@ impl Stand {
     }
 
     /// Ждёт вывода в заданном состоянии.
-    async fn conclusion(&self, incident: i64, state: &str) -> Option<sre_store::Finding> {
+    async fn conclusion(&self, incident: i64, state: &str) -> Option<autosre_store::Finding> {
         for _ in 0..150 {
             if let Ok(Some(found)) = self.store.conclusion(incident).await
                 && found.state == state
