@@ -1,5 +1,8 @@
 # sreagent
 
+[![Проверки](https://github.com/labaznov/autosre/actions/workflows/check.yml/badge.svg)](https://github.com/labaznov/autosre/actions/workflows/check.yml)
+[![Лицензия MIT](https://img.shields.io/badge/лицензия-MIT-informational)](LICENSE)
+
 > **In English.** A second diagnostic loop for on-call SRE. The agent watches
 > VictoriaLogs and VictoriaMetrics, finds deviations with a robust detector,
 > sifts routine noise with a cheap model call, investigates what survives using
@@ -26,6 +29,9 @@
 **Агент не чинит и не ходит на хосты.** Он сокращает время до обнаружения и
 время до понимания. Всё, чего он не может увидеть сам, он просит выполнить
 человека и ждёт ответа.
+
+Репозиторий зовётся `autosre`, бинарь и крейты — `sreagent`: первое имя
+продукта, второе — команды, которую запускают.
 
 ## Что он делает
 
