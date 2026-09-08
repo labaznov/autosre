@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use autosre_app::config::{Config, Process};
+use autosre_app::config::{Config, Envfile, Process};
 use autosre_app::metrics::Metrics;
 use autosre_app::session::Doorman;
 use autosre_app::{
@@ -68,7 +68,7 @@ autosre --version                версия и коммит";
 
 /// Проверка до старта: настройки, база, знания, источники, модель.
 async fn check(path: &str) -> ExitCode {
-    let config = match Config::read(Path::new(path), &Process) {
+    let config = match Config::read(Path::new(path), &Envfile::beside(&Process, Path::new(path))) {
         Ok(config) => config,
         Err(failure) => {
             println!("  ✗ настройки  {failure}");
@@ -92,7 +92,7 @@ async fn check(path: &str) -> ExitCode {
 /// Копия базы средствами `SQLite`: годится на живом агенте.
 async fn backup(target: &str, path: &str) -> ExitCode {
     let done = async {
-        let config = Config::read(Path::new(path), &Process)?;
+        let config = Config::read(Path::new(path), &Envfile::beside(&Process, Path::new(path)))?;
         let store = Store::open(&config.file.database)?;
         store.backup(Path::new(target)).await?;
         Ok::<_, Failure>(config.file.database)
@@ -138,7 +138,7 @@ enum Failure {
 }
 
 async fn serve(path: &str) -> Result<(), Failure> {
-    let config = Config::read(Path::new(path), &Process)?;
+    let config = Config::read(Path::new(path), &Envfile::beside(&Process, Path::new(path)))?;
     for key in &config.unknown {
         tracing::warn!(key, "настройка неизвестна агенту и пропущена");
     }

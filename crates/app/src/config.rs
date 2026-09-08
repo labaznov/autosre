@@ -25,6 +25,55 @@ impl Env for Process {
     }
 }
 
+/// Окружение с запасным файлом `КЛЮЧ=значение`.
+///
+/// Под systemd секреты приходят из `EnvironmentFile`, и в окружении процесса
+/// они есть. У человека, запустившего `autosre check` руками, их нет — и
+/// проверка падала бы на первом же ключе. Файл читается только за тем, чего
+/// нет в окружении: окружение главнее.
+pub struct Envfile<'a> {
+    inner: &'a dyn Env,
+    path: PathBuf,
+}
+
+impl<'a> Envfile<'a> {
+    /// Окружение и файл по указанному пути.
+    #[must_use]
+    pub fn new(inner: &'a dyn Env, path: impl Into<PathBuf>) -> Self {
+        Self {
+            inner,
+            path: path.into(),
+        }
+    }
+
+    /// Окружение и файл `autosre.env` рядом с файлом настроек — так их
+    /// раскладывает `install.sh`.
+    #[must_use]
+    pub fn beside(inner: &'a dyn Env, settings: &Path) -> Self {
+        Self::new(inner, settings.with_file_name("autosre.env"))
+    }
+
+    fn stored(&self, key: &str) -> Option<String> {
+        let text = std::fs::read_to_string(&self.path).ok()?;
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| line.split_once('='))
+            .find(|(name, _)| name.trim() == key)
+            .map(|(_, value)| value.trim().trim_matches('"').trim_matches('\'').to_owned())
+            .filter(|value| !value.is_empty())
+    }
+}
+
+impl Env for Envfile<'_> {
+    fn var(&self, key: &str) -> Option<String> {
+        self.inner
+            .var(key)
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| self.stored(key))
+    }
+}
+
 /// Отказы разбора настроек.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -35,7 +84,7 @@ pub enum ConfigError {
     },
     #[error("файл настроек не разобран: {0}")]
     Parse(#[from] toml::de::Error),
-    #[error("переменная окружения {0} не задана")]
+    #[error("переменная {0} не задана ни в окружении, ни в autosre.env рядом с настройками")]
     Missing(&'static str),
     #[error("{0}")]
     Invalid(String),

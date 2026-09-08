@@ -62,6 +62,74 @@ width = "15m"
 period = "1m"
 "#;
 
+/// Файл секретов рядом с файлом настроек.
+fn envfile(settings: &Settings, body: &str) -> PathBuf {
+    let path = settings.path.with_file_name("autosre.env");
+    std::fs::write(&path, body).expect("файл секретов не записан");
+    path
+}
+
+#[test]
+fn takes_a_missing_secret_from_the_env_file_beside_the_settings() {
+    let settings = Settings::of(ENOUGH);
+    envfile(
+        &settings,
+        "AUTOSRE_MODEL_KEY=sk-from-file\nAUTOSRE_SESSION_KEY=s3ss\n",
+    );
+    let none = Keys(vec![]);
+    let env = autosre_app::config::Envfile::beside(&none, &settings.path);
+    assert_eq!(settings.read(&env).unwrap().secrets.model, "sk-from-file");
+}
+
+#[test]
+fn prefers_the_process_environment_to_the_file() {
+    let settings = Settings::of(ENOUGH);
+    envfile(
+        &settings,
+        "AUTOSRE_MODEL_KEY=sk-from-file\nAUTOSRE_SESSION_KEY=s3ss\n",
+    );
+    let env = autosre_app::config::Envfile::beside(&full(), &settings.path);
+    assert_eq!(
+        settings.read(&env).unwrap().secrets.model,
+        "sk-Q7f3-ephemeral"
+    );
+}
+
+#[test]
+fn reads_the_env_file_past_comments_and_quotes() {
+    let settings = Settings::of(ENOUGH);
+    envfile(
+        &settings,
+        "# секреты\nAUTOSRE_MODEL_KEY=\"sk-quoted\"\n\nAUTOSRE_SESSION_KEY = 's3ss'\n",
+    );
+    let none = Keys(vec![]);
+    let env = autosre_app::config::Envfile::beside(&none, &settings.path);
+    let secrets = settings.read(&env).unwrap().secrets;
+    assert_eq!(
+        (secrets.model.as_str(), secrets.session.as_str()),
+        ("sk-quoted", "s3ss")
+    );
+}
+
+#[test]
+fn treats_an_empty_value_in_the_file_as_missing() {
+    let settings = Settings::of(ENOUGH);
+    envfile(&settings, "AUTOSRE_MODEL_KEY=\nAUTOSRE_SESSION_KEY=s3ss\n");
+    let none = Keys(vec![]);
+    let env = autosre_app::config::Envfile::beside(&none, &settings.path);
+    assert!(matches!(
+        settings.read(&env).unwrap_err(),
+        ConfigError::Missing("AUTOSRE_MODEL_KEY")
+    ));
+}
+
+#[test]
+fn lives_without_the_env_file() {
+    let settings = Settings::of(ENOUGH);
+    let env = autosre_app::config::Envfile::beside(&full(), &settings.path);
+    assert!(settings.read(&env).is_ok());
+}
+
 #[test]
 fn reads_the_bind_address() {
     let settings = Settings::of(&format!("bind = \"127.0.0.1:8791\"\n{ENOUGH}"));
