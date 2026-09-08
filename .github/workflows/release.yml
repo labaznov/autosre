@@ -34,6 +34,9 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
 
       - name: Собрать статический бинарь
+        env:
+          # Коммит попадает в `autosre --version`: на сервере видно, что стоит.
+          AUTOSRE_COMMIT: ${{ github.sha }}
         run: cargo build --release --target x86_64-unknown-linux-musl --bin autosre
 
       - name: Проверить, что бинарь ни от чего не зависит
