@@ -88,7 +88,8 @@ fn prefers_the_process_environment_to_the_file() {
         &settings,
         "AUTOSRE_MODEL_KEY=sk-from-file\nAUTOSRE_SESSION_KEY=s3ss\n",
     );
-    let env = autosre_app::config::Envfile::beside(&full(), &settings.path);
+    let keys = full();
+    let env = autosre_app::config::Envfile::beside(&keys, &settings.path);
     assert_eq!(
         settings.read(&env).unwrap().secrets.model,
         "sk-Q7f3-ephemeral"
@@ -126,7 +127,8 @@ fn treats_an_empty_value_in_the_file_as_missing() {
 #[test]
 fn lives_without_the_env_file() {
     let settings = Settings::of(ENOUGH);
-    let env = autosre_app::config::Envfile::beside(&full(), &settings.path);
+    let keys = full();
+    let env = autosre_app::config::Envfile::beside(&keys, &settings.path);
     assert!(settings.read(&env).is_ok());
 }
 
