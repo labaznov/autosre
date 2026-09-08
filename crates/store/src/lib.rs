@@ -116,6 +116,19 @@ pub struct Sifted {
     pub judge: Option<String>,
 }
 
+/// Что именно забывать при уборке: род просроченного, по одному за транзакцию.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stale {
+    /// Закрытые инциденты со всем, что на них ссылается.
+    Incidents,
+    /// Расследования закрытых инцидентов с шагами и заявками, старые уроки.
+    Investigations,
+    /// Отклонения, не прилипшие ни к какому инциденту.
+    Deviations,
+    /// Приглушения, чей срок давно вышел.
+    Mutes,
+}
+
 /// Урок: один заход в модель целиком, как он был сделан.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lesson {
@@ -2154,6 +2167,85 @@ impl Store {
                 "DELETE FROM hours WHERE source = ?1 AND at < ?2",
                 params![source, hours.stamp()],
             )?;
+            change.commit()?;
+            Ok(gone)
+        })
+        .await
+    }
+
+    /// Забывает просроченное одного рода, одной транзакцией.
+    ///
+    /// По одному роду за вызов, а не всё разом: уборка держит единственное
+    /// соединение, и съём минут ждёт её окончания
+    /// ([ADR-0022](../../../docs/adr/0022-retention.md)). Отвечает числом
+    /// удалённых строк по всем задетым таблицам.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`] на отказе записи.
+    pub async fn prune(&self, stale: Stale, edge: Minute) -> Result<usize, StoreError> {
+        self.work(move |db| {
+            let change = db.unchecked_transaction()?;
+            let mut gone = 0;
+            let mut run = |sentence: &str| -> Result<(), StoreError> {
+                gone += change.execute(sentence, params![edge.stamp()])?;
+                Ok(())
+            };
+            match stale {
+                // Открытый инцидент не удаляется никогда: у него ещё есть
+                // будущее. Закрытый уходит вместе со всем, что на него
+                // ссылается, иначе остаются связи в никуда.
+                Stale::Incidents => {
+                    const GONE: &str =
+                        "SELECT id FROM incidents WHERE state <> 'open' AND last < ?1";
+                    run(&format!("DELETE FROM lessons WHERE incident IN ({GONE})"))?;
+                    run(&format!(
+                        "DELETE FROM steps WHERE investigation IN
+                           (SELECT id FROM investigations WHERE incident IN ({GONE}))"
+                    ))?;
+                    run(&format!("DELETE FROM inquiries WHERE incident IN ({GONE})"))?;
+                    run(&format!(
+                        "DELETE FROM investigations WHERE incident IN ({GONE})"
+                    ))?;
+                    run(&format!("DELETE FROM drafts WHERE incident IN ({GONE})"))?;
+                    run(&format!(
+                        "DELETE FROM links WHERE incident IN ({GONE}) OR related IN ({GONE})"
+                    ))?;
+                    run(&format!(
+                        "DELETE FROM deviations WHERE incident IN ({GONE})"
+                    ))?;
+                    run("DELETE FROM incidents WHERE state <> 'open' AND last < ?1")?;
+                }
+                // Расследование открытого инцидента живёт с ним: оно ещё
+                // может продолжиться ответом на заявку.
+                Stale::Investigations => {
+                    const GONE: &str = "SELECT v.id FROM investigations v
+                        WHERE v.started < ?1
+                          AND NOT EXISTS (SELECT 1 FROM incidents i
+                                           WHERE i.id = v.incident AND i.state = 'open')";
+                    run(&format!(
+                        "DELETE FROM lessons WHERE investigation IN ({GONE})"
+                    ))?;
+                    run("DELETE FROM lessons WHERE at < ?1")?;
+                    run(&format!(
+                        "DELETE FROM steps WHERE investigation IN ({GONE})"
+                    ))?;
+                    run(&format!(
+                        "DELETE FROM inquiries WHERE investigation IN ({GONE})"
+                    ))?;
+                    run(&format!("DELETE FROM investigations WHERE id IN ({GONE})"))?;
+                }
+                // Отклонение, прилипшее к инциденту, уходит с ним; остальные —
+                // отсеянные и приглушённые — сами по себе и живут своим сроком.
+                Stale::Deviations => {
+                    const GONE: &str =
+                        "SELECT id FROM deviations WHERE incident IS NULL AND found < ?1";
+                    run(&format!("DELETE FROM lessons WHERE deviation IN ({GONE})"))?;
+                    run("DELETE FROM deviations WHERE incident IS NULL AND found < ?1")?;
+                }
+                Stale::Mutes => {
+                    run("DELETE FROM mutes WHERE until < ?1")?;
+                }
+            }
             change.commit()?;
             Ok(gone)
         })

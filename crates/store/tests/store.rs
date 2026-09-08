@@ -1999,3 +1999,213 @@ async fn brings_the_verdict_of_a_sift_into_the_corpus() {
         Some(false)
     );
 }
+
+/// Закрытый инцидент, заведённый в указанную минуту.
+async fn closed(base: &Base, at: Minute) -> i64 {
+    let (id, found) = spotted(base, &wifi(), at, 91.0).await;
+    let (incident, _) = base
+        .store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+            "стоит разобрать",
+        )
+        .await
+        .unwrap();
+    base.store.hush(at.back(-60), at.back(-60)).await.unwrap();
+    incident
+}
+
+#[tokio::test]
+async fn forgets_a_closed_incident_whose_time_has_passed() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = closed(&base, at).await;
+    base.store
+        .prune(autosre_store::Stale::Incidents, at.back(-1))
+        .await
+        .unwrap();
+    assert!(base.store.one(incident).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn forgets_the_deviations_of_a_forgotten_incident() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = closed(&base, at).await;
+    base.store
+        .prune(autosre_store::Stale::Incidents, at.back(-1))
+        .await
+        .unwrap();
+    assert!(base.store.parts(incident).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn keeps_an_open_incident_however_old() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+    let (incident, _) = base
+        .store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+            "стоит разобрать",
+        )
+        .await
+        .unwrap();
+    base.store
+        .prune(autosre_store::Stale::Incidents, at.back(-365 * 24 * 60))
+        .await
+        .unwrap();
+    assert!(base.store.one(incident).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn keeps_an_incident_confirmed_after_the_edge() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = closed(&base, at).await;
+    base.store
+        .prune(autosre_store::Stale::Incidents, at.back(1))
+        .await
+        .unwrap();
+    assert!(base.store.one(incident).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn forgets_an_old_investigation_with_its_steps() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = closed(&base, at).await;
+    let investigation = base.store.dig(incident, "error-burst", at).await.unwrap();
+    base.store
+        .step(investigation, 0, "collect", "signatures", "…")
+        .await
+        .unwrap();
+    base.store
+        .prune(autosre_store::Stale::Investigations, at.back(-1))
+        .await
+        .unwrap();
+    assert!(base.store.steps(investigation).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn keeps_the_investigation_of_an_open_incident() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, found) = spotted(&base, &wifi(), at, 91.0).await;
+    let (incident, _) = base
+        .store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &found,
+            "стоит разобрать",
+        )
+        .await
+        .unwrap();
+    base.store.dig(incident, "error-burst", at).await.unwrap();
+    base.store
+        .prune(autosre_store::Stale::Investigations, at.back(-1))
+        .await
+        .unwrap();
+    assert!(base.store.conclusion(incident).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn forgets_old_lessons() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .learn(
+            &autosre_store::Lesson {
+                kind: "triage".to_owned(),
+                model: "поддельная".to_owned(),
+                incident: None,
+                investigation: None,
+                deviation: None,
+                system: "Ты — Auto SRE".to_owned(),
+                ask: "Сервис: orders-api".to_owned(),
+                answer: "{\"worth\":false}".to_owned(),
+            },
+            at,
+        )
+        .await
+        .unwrap();
+    base.store
+        .prune(autosre_store::Stale::Investigations, at.back(-1))
+        .await
+        .unwrap();
+    assert_eq!(base.store.learned().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn forgets_sifted_deviations_that_went_stale() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let (id, _) = spotted(&base, &wifi(), at, 91.0).await;
+    base.store.sift(id, "ночная выгрузка").await.unwrap();
+    base.store
+        .prune(autosre_store::Stale::Deviations, at.back(-1))
+        .await
+        .unwrap();
+    assert!(
+        base.store
+            .sifts(at.back(60), at.back(-60), 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_deviations_of_a_living_incident() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let incident = closed(&base, at).await;
+    base.store
+        .prune(autosre_store::Stale::Deviations, at.back(-1))
+        .await
+        .unwrap();
+    assert_eq!(base.store.parts(incident).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn forgets_a_mute_long_after_it_ended() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    base.store
+        .mute(
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            at.back(-60),
+            ("букин", "шум"),
+            at,
+        )
+        .await
+        .unwrap();
+    base.store
+        .prune(autosre_store::Stale::Mutes, at.back(-61))
+        .await
+        .unwrap();
+    assert!(base.store.mutes(at, 10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reports_how_many_rows_it_forgot() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    closed(&base, at).await;
+    let gone = base
+        .store
+        .prune(autosre_store::Stale::Incidents, at.back(-1))
+        .await
+        .unwrap();
+    assert_eq!(gone, 2);
+}

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use autosre_domain::{Bucket, Hour, Minute, Span};
 use autosre_source::Source;
-use autosre_store::Store;
+use autosre_store::{Stale, Store};
 use chrono::Utc;
 
 use crate::config::{Collector, Retention};
@@ -41,6 +41,10 @@ pub fn collect(
     }
 }
 
+/// Сколько приглушение хранится после срока: чтобы можно было спросить, кто
+/// и почему заглушил ([ADR-0022](../../../docs/adr/0022-retention.md)).
+const MUTES_AFTER: Duration = Duration::from_hours(90 * 24);
+
 /// Заводит уборку: свёртку минут в часы и забвение просроченного.
 pub fn tidy(sources: &[Arc<dyn Source>], store: &Store, settings: &Retention) {
     let names: Vec<String> = sources
@@ -50,6 +54,8 @@ pub fn tidy(sources: &[Arc<dyn Source>], store: &Store, settings: &Retention) {
     let store = store.clone();
     let minutes = settings.minute_buckets;
     let hours = settings.hour_buckets;
+    let investigations = settings.investigations;
+    let incidents = settings.incidents;
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_hours(1));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -58,8 +64,34 @@ pub fn tidy(sources: &[Arc<dyn Source>], store: &Store, settings: &Retention) {
             for name in &names {
                 sweep(name, &store, minutes, hours).await;
             }
+            let now = Minute::of(Utc::now());
+            // Отклонения без инцидента живут столько же, сколько расследования:
+            // это тот же род данных — что видел агент и что решил.
+            for (stale, after) in [
+                (Stale::Investigations, investigations),
+                (Stale::Deviations, investigations),
+                (Stale::Incidents, incidents),
+                (Stale::Mutes, MUTES_AFTER),
+            ] {
+                prune(&store, stale, now.back(minutes_of(after))).await;
+                tokio::task::yield_now().await;
+            }
         }
     });
+}
+
+/// Забывает просроченное одного рода и пишет об этом в журнал.
+async fn prune(store: &Store, stale: Stale, edge: Minute) {
+    match store.prune(stale, edge).await {
+        Ok(gone) if gone > 0 => tracing::info!(?stale, rows = gone, "просроченное забыто"),
+        Ok(_) => {}
+        Err(failure) => tracing::error!(?stale, %failure, "забыть просроченное не удалось"),
+    }
+}
+
+/// Длительность в минутах: сроки хранения меряются днями и в `i64` влезают.
+fn minutes_of(duration: Duration) -> i64 {
+    i64::try_from(duration.as_secs() / 60).unwrap_or(i64::MAX)
 }
 
 /// Закрывает дыры в ряду, оставшиеся от простоя.
