@@ -146,6 +146,10 @@ pub struct Incident {
     pub signature: Signature,
     pub stream: Stream,
     pub source: String,
+    /// Горизонт первого отклонения: по нему выбирается скилл.
+    ///
+    /// Пусто у инцидентов, заведённых до того, как горизонт стали хранить.
+    pub horizon: String,
     pub state: State,
     /// Момент первого наблюдения: от него считается время до обнаружения.
     pub began: Minute,

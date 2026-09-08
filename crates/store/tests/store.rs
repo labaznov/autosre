@@ -526,6 +526,34 @@ async fn opens_an_incident_for_a_loose_deviation() {
 }
 
 #[tokio::test]
+async fn remembers_the_horizon_the_incident_opened_on() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:15:00Z");
+    let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0, 5.0], 91.0, Kind::Sum);
+    let deviation = Deviation::new("logs", &wifi(), "24h", at, verdict);
+    base.store.spot(&deviation, at).await.unwrap();
+    let id = base.store.loose(10).await.unwrap()[0].0;
+    let (incident, _) = base
+        .store
+        .attach(
+            id,
+            &Service::new("orders-api"),
+            &Signature::of("timed out"),
+            &deviation,
+            "стоит разобрать",
+        )
+        .await
+        .unwrap();
+    let found = base
+        .store
+        .one(incident)
+        .await
+        .unwrap()
+        .expect("инцидента нет");
+    assert_eq!(found.horizon, "24h");
+}
+
+#[tokio::test]
 async fn keeps_one_incident_for_the_same_service_and_signature() {
     let base = Base::open();
     let first = minute("2026-08-17T10:15:00Z");

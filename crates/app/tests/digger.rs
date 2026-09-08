@@ -47,6 +47,21 @@ collect:
 Смотри на строки.
 ";
 
+/// Скилл для логов на сутках: до столбца горизонта не применялся никогда.
+const DAILY: &str = r"---
+name: daily
+title: Сутки
+horizon: 24h
+when:
+  signal: errors
+collect:
+  - id: by_hour
+    vl: '_time:[{start}, {end}) {stream} | stats by (_time:1h) count() as total'
+---
+
+Смотри на форму суток.
+";
+
 /// Источник, который всегда отдаёт одни и те же строки и помнит, что его
 /// спрашивали.
 #[derive(Clone, Default)]
@@ -194,10 +209,15 @@ impl Stand {
 
     /// Заводит инцидент, начавшийся указанное число минут назад.
     async fn incident(&self, ago: i64) -> i64 {
+        self.seen(ago, "15m").await
+    }
+
+    /// Заводит инцидент по логам на заданном горизонте.
+    async fn seen(&self, ago: i64, horizon: &str) -> i64 {
         let at = Minute::of(chrono::Utc::now()).back(ago);
         let stream = Stream::new("{host=\"node-01\",service=\"orders-api\"}");
         let verdict = Detector::new(Thresholds::default()).verdict(&[4.0, 4.0], 91.0, Kind::Sum);
-        let deviation = Deviation::new("logs", &stream, "15m", at, verdict);
+        let deviation = Deviation::new("logs", &stream, horizon, at, verdict);
         self.store.spot(&deviation, at).await.unwrap();
         let id = self.store.loose(10).await.unwrap()[0].0;
         self.store
@@ -302,6 +322,30 @@ async fn puts_the_query_result_into_the_dossier() {
     let found = stand.wait(incident, "done").await.expect("вывода нет");
     let steps = stand.store.steps(found.id).await.unwrap();
     assert_eq!(steps[0].2, "_time=2026-08-17T10:00:00Z total=40");
+}
+
+#[tokio::test]
+async fn applies_a_daily_skill_to_a_daily_incident_of_logs() {
+    let stand = Stand::skilled(DAILY).await;
+    let incident = stand.seen(1, "24h").await;
+    let found = stand.wait(incident, "done").await.expect("вывода нет");
+    assert_eq!(found.skill, "daily");
+}
+
+#[tokio::test]
+async fn asks_for_the_whole_day_on_a_daily_skill() {
+    let stand = Stand::skilled(DAILY).await;
+    let incident = stand.seen(1, "24h").await;
+    stand.wait(incident, "done").await.expect("вывода нет");
+    let asked = stand.talker.0.lock().unwrap().clone();
+    let (start, rest) = asked[0]
+        .trim_start_matches("_time:[")
+        .split_once(", ")
+        .expect("границ нет");
+    let end = rest.split_once(')').expect("конца нет").0;
+    let width = end.parse::<chrono::DateTime<chrono::Utc>>().unwrap()
+        - start.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+    assert_eq!(width.num_hours(), 24);
 }
 
 #[tokio::test]

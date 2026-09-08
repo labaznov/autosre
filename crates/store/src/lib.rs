@@ -54,6 +54,13 @@ impl Parts {
 /// Предел ожидания на заблокированной базе.
 const BUSY_TIMEOUT: &str = "5000";
 
+/// Столбцы инцидента в том порядке, в каком их читает [`read_incident`].
+///
+/// Один список на все выборки: шесть копий разъезжались бы при каждом новом
+/// столбце, и разъезд обнаруживался бы по индексу в чтении, а не при сборке.
+const INCIDENT: &str = "id, service, signature, stream, source, state, began, last, \
+                        seen, peak, weight, verdict, because, severity, horizon";
+
 /// Отказы хранилища.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -790,8 +797,8 @@ impl Store {
                 change.execute(
                     "INSERT INTO incidents
                        (service, signature, stream, source, state, began, last,
-                        seen, peak, weight, because)
-                     VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?5, 1, ?6, ?7, ?8)",
+                        seen, peak, weight, because, horizon)
+                     VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?5, 1, ?6, ?7, ?8, ?9)",
                     params![
                         service,
                         signature,
@@ -800,7 +807,8 @@ impl Store {
                         found.at.stamp(),
                         found.value,
                         found.weight,
-                        because
+                        because,
+                        found.horizon
                     ],
                 )?;
                 (change.last_insert_rowid(), true)
@@ -826,15 +834,14 @@ impl Store {
     /// [`StoreError::Sqlite`] на отказе чтения.
     pub async fn awaiting(&self, limit: usize) -> Result<Vec<Incident>, StoreError> {
         self.work(move |db| {
-            let mut query = db.prepare(
-                "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because, severity
+            let mut query = db.prepare(&format!(
+                "SELECT {INCIDENT}
                    FROM incidents
                   WHERE state = 'open'
                     AND id NOT IN (SELECT incident FROM investigations
                                     WHERE state <> 'answered')
                   ORDER BY weight DESC, id ASC LIMIT ?1",
-            )?;
+            ))?;
             let rows = query.query_map(params![limit], read_incident)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
@@ -1224,27 +1231,24 @@ impl Store {
                 let rows = query.query_map(params![from, to], read_incident)?;
                 Ok(rows.collect::<Result<Vec<_>, _>>()?)
             };
-            let opened = incidents(
-                "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because, severity
+            let opened = incidents(&format!(
+                "SELECT {INCIDENT}
                    FROM incidents
                   WHERE state <> 'merged' AND began >= ?1 AND began < ?2
                   ORDER BY weight DESC, id",
-            )?;
-            let closed = incidents(
-                "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because, severity
+            ))?;
+            let closed = incidents(&format!(
+                "SELECT {INCIDENT}
                    FROM incidents
                   WHERE state = 'closed' AND closed >= ?1 AND closed < ?2
                   ORDER BY last DESC, id",
-            )?;
-            let still = incidents(
-                "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because, severity
+            ))?;
+            let still = incidents(&format!(
+                "SELECT {INCIDENT}
                    FROM incidents
                   WHERE state = 'open' AND began < ?2 AND ?1 <= ?2
                   ORDER BY weight DESC, id",
-            )?;
+            ))?;
             let count = |sentence: &str| -> Result<u64, StoreError> {
                 Ok(db.query_row(sentence, params![from, to], |row| row.get::<_, u64>(0))?)
             };
@@ -1978,13 +1982,12 @@ impl Store {
     /// [`StoreError::Sqlite`] на отказе чтения.
     pub async fn incidents(&self, open: bool, limit: usize) -> Result<Vec<Incident>, StoreError> {
         self.work(move |db| {
-            let mut query = db.prepare(
-                "SELECT id, service, signature, stream, source, state, began, last,
-                        seen, peak, weight, verdict, because, severity
+            let mut query = db.prepare(&format!(
+                "SELECT {INCIDENT}
                    FROM incidents
                   WHERE state <> 'merged' AND (?1 = 0 OR state = 'open')
                   ORDER BY last DESC, id DESC LIMIT ?2",
-            )?;
+            ))?;
             let rows = query.query_map(params![i64::from(open), limit], read_incident)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
@@ -2002,9 +2005,7 @@ impl Store {
         self.work(move |db| {
             Ok(db
                 .query_row(
-                    "SELECT id, service, signature, stream, source, state, began, last,
-                            seen, peak, weight, verdict, because, severity
-                       FROM incidents WHERE id = ?1",
+                    &format!("SELECT {INCIDENT} FROM incidents WHERE id = ?1"),
                     params![incident],
                     read_incident,
                 )
@@ -2267,6 +2268,7 @@ fn read_incident(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
         severity: row
             .get::<_, Option<String>>(13)?
             .map(|it| Severity::of(&it)),
+        horizon: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
     })
 }
 

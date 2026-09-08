@@ -321,4 +321,13 @@ pub const STEPS: &[&str] = &[
     ALTER TABLE lessons ADD COLUMN deviation INTEGER;
     CREATE INDEX IF NOT EXISTS deviations_sifted ON deviations (sifted, found);
     ",
+    // 18. Горизонт инцидента.
+    //
+    // До этого горизонт добывался из подстроки сигнатуры метрик, а у логов
+    // считался пятнадцатиминутным всегда — и скилл для логов на сутках не
+    // применялся ни разу. Старые строки остаются без горизонта: чтение это
+    // терпит, а выдумывать им горизонт задним числом незачем.
+    "
+    ALTER TABLE incidents ADD COLUMN horizon TEXT;
+    ",
 ];
