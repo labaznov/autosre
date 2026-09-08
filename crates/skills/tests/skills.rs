@@ -148,6 +148,14 @@ fn ignores_files_that_are_not_skills() {
 }
 
 #[test]
+fn skips_hidden_files_left_by_an_archiver() {
+    let directory = TempDir::new().expect("временный каталог не создан");
+    std::fs::write(directory.path().join("good.md"), PLAIN).expect("скилл не записан");
+    std::fs::write(directory.path().join("._good.md"), "мусор").expect("файл не записан");
+    assert_eq!(read(directory.path()).unwrap().len(), 1);
+}
+
+#[test]
 fn fills_the_window_into_a_query() {
     let filled = autosre_skills::fill(
         "_time:[{start}, {end}) {stream}",

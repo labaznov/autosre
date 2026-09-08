@@ -28,7 +28,8 @@ find "$STAGE/$NAME/knowledge" -name .DS_Store -delete
 mkdir -p "$STAGE/$NAME/knowledge/drafts" "$STAGE/$NAME/knowledge/reports/daily" \
     "$STAGE/$NAME/knowledge/reports/weekly" "$STAGE/$NAME/knowledge/reports/incidents"
 
-tar -C "$STAGE" -czf "$OUT/$NAME.tar.gz" "$NAME"
+# Без расширенных атрибутов macOS: иначе в архиве появляются файлы `._имя`.
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$STAGE" -czf "$OUT/$NAME.tar.gz" "$NAME"
 (cd "$OUT" && { command -v sha256sum >/dev/null 2>&1 && sha256sum "$NAME.tar.gz" || shasum -a 256 "$NAME.tar.gz"; } > "$NAME.sha256")
 rm -rf "$STAGE"
 echo "$OUT/$NAME.tar.gz"

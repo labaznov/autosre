@@ -18,11 +18,16 @@ const CONFIG: &str = "/etc/autosre/autosre.toml";
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_env("AUTOSRE_LOG").unwrap_or_else(|_| "info".into()))
-        .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    // Разовые команды печатают ответ сами; журнал им нужен только для бед.
+    let quiet = matches!(words.first(), Some(&("check" | "backup" | "hash")));
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_env("AUTOSRE_LOG")
+                .unwrap_or_else(|_| if quiet { "warn" } else { "info" }.into()),
+        )
+        .init();
     match words.as_slice() {
         ["--version" | "-V" | "version"] => {
             println!("{}", autosre_app::version());

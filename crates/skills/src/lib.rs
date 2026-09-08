@@ -162,7 +162,13 @@ pub fn read(directory: &Path) -> Result<Vec<Skill>, SkillError> {
     let mut skills = Vec::new();
     for entry in std::fs::read_dir(directory)? {
         let path = entry?.path();
-        if path.extension().is_none_or(|it| it != "md") {
+        // Скрытые файлы — не скиллы: архиватор macOS оставляет рядом с каждым
+        // файлом свой `._имя.md`, и ругаться на него нечего.
+        if path.extension().is_none_or(|it| it != "md")
+            || path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+        {
             continue;
         }
         match std::fs::read_to_string(&path)
