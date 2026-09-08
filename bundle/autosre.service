@@ -29,9 +29,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+# Самоподписанный сертификат агент кладёт туда же, в tls/.
 ReadWritePaths=/opt/data/autosre
-# Сертификат для встроенного TLS агент кладёт рядом с настройками.
-ReadWritePaths=/etc/autosre
 
 [Install]
 WantedBy=multi-user.target

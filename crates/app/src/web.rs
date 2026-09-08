@@ -38,6 +38,8 @@ pub struct Shared {
     labels: Vec<String>,
     reporter: Option<Reporter>,
     version: &'static str,
+    /// Снаружи HTTPS: кука сессии помечается `Secure`.
+    secure: bool,
 }
 
 impl Shared {
@@ -58,7 +60,14 @@ impl Shared {
             labels: Vec::new(),
             reporter: None,
             version,
+            secure: false,
         }
+    }
+
+    /// Та же обвязка, знающая, что снаружи TLS: кука не уйдёт по HTTP.
+    #[must_use]
+    pub fn securing(self, secure: bool) -> Self {
+        Self { secure, ..self }
     }
 
     /// Та же обвязка, знающая, из каких меток брать имя сервиса.
@@ -812,10 +821,11 @@ async fn enter(State(shared): State<Shared>, Form(given): Form<Credentials>) -> 
         tracing::warn!(login = given.login, "вход не удался");
         return render(&Door { failed: true });
     };
+    let secure = if shared.secure { "; Secure" } else { "" };
     (
         [(
             header::SET_COOKIE,
-            format!("{COOKIE}={session}; Path=/; HttpOnly; SameSite=Lax"),
+            format!("{COOKIE}={session}; Path=/; HttpOnly; SameSite=Lax{secure}"),
         )],
         Redirect::to("/"),
     )

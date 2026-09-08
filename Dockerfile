@@ -19,6 +19,6 @@ EXPOSE 8096
 # Проверка здоровья вшита в образ: снаружи её пришлось бы описывать в каждом
 # compose и в роли — и рано или поздно они разошлись бы.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8096/api/health || exit 1
+  CMD wget -qO- --no-check-certificate https://127.0.0.1:8096/api/health || exit 1
 ENTRYPOINT ["/usr/local/bin/autosre"]
 CMD ["/etc/autosre/autosre.toml"]

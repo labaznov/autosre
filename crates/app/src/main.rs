@@ -8,7 +8,7 @@ use autosre_app::config::{Config, Process};
 use autosre_app::metrics::Metrics;
 use autosre_app::session::Doorman;
 use autosre_app::{
-    VERSION, collector, digger, grouper, librarian, reporter, rig, scribe, watcher, web,
+    VERSION, collector, digger, grouper, librarian, reporter, rig, scribe, tls, watcher, web,
 };
 use autosre_store::Store;
 use tracing_subscriber::EnvFilter;
@@ -133,6 +133,8 @@ enum Failure {
     Store(#[from] autosre_store::StoreError),
     #[error(transparent)]
     Rig(#[from] autosre_app::rig::RigError),
+    #[error("TLS не поднят: {0}")]
+    Tls(#[from] autosre_app::tls::TlsError),
 }
 
 async fn serve(path: &str) -> Result<(), Failure> {
@@ -214,18 +216,46 @@ async fn serve(path: &str) -> Result<(), Failure> {
     )
     .writing(scribe)
     .collecting(&config.file.corpus)
-    .grouping(&config.file.incidents);
-    let listener = tokio::net::TcpListener::bind(config.file.bind).await?;
+    .grouping(&config.file.incidents)
+    .securing(config.file.tls.enabled);
     tracing::info!(
         address = %config.file.bind,
+        https = config.file.tls.enabled,
         horizons = config.file.enabled().len(),
         model = config.file.model.name,
         version = autosre_app::version(),
         "агент поднят"
     );
-    axum::serve(listener, web::routes(shared))
-        .with_graceful_shutdown(stop())
+    listen(&config, shared).await
+}
+
+/// Веб-морда до сигнала остановки: по HTTPS, если TLS не выключен.
+async fn listen(config: &Config, shared: web::Shared) -> Result<(), Failure> {
+    let listener = tokio::net::TcpListener::bind(config.file.bind).await?;
+    if config.file.tls.enabled {
+        let (certificate, fresh) =
+            tls::certificate(&config.file.tls.cert, &config.file.tls.key).await?;
+        if fresh {
+            tracing::warn!(
+                cert = %config.file.tls.cert.display(),
+                "сделан самоподписанный сертификат: браузер предупредит, подложите свой по тому же пути"
+            );
+        }
+        tls::serve(
+            listener.into_std()?,
+            certificate,
+            web::routes(shared),
+            stop(),
+        )
         .await?;
+    } else {
+        tracing::warn!(
+            "TLS выключен: пароль дежурного идёт по сети открытым, снаружи нужен прокси с HTTPS"
+        );
+        axum::serve(listener, web::routes(shared))
+            .with_graceful_shutdown(stop())
+            .await?;
+    }
     Ok(())
 }
 

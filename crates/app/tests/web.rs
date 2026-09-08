@@ -27,6 +27,11 @@ struct Agent {
 
 impl Agent {
     async fn start() -> Self {
+        Self::behind(false).await
+    }
+
+    /// Веб-морда, знающая, что снаружи TLS.
+    async fn behind(tls: bool) -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
         let store = Store::open(&directory.path().join("autosre.db")).expect("база не открыта");
         let doorman = Doorman::new(
@@ -46,7 +51,8 @@ impl Agent {
             doorman,
             &knowledge,
             "0.1.0-тест",
-        );
+        )
+        .securing(tls);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("порт не занят");
@@ -252,6 +258,20 @@ async fn tells_when_the_last_bucket_was_taken() {
         .bucket(SystemTime::UNIX_EPOCH + Duration::from_mins(29_782_811));
     let health: serde_json::Value = agent.get("/api/health").await.json().await.unwrap();
     assert_eq!(health["last_bucket"], 1_786_968_660);
+}
+
+#[tokio::test]
+async fn marks_the_cookie_secure_behind_tls() {
+    let agent = Agent::behind(true).await;
+    let cookie = agent.enter("duty", SECRET).await.expect("куки нет");
+    assert!(cookie.contains("; Secure"), "{cookie}");
+}
+
+#[tokio::test]
+async fn leaves_the_cookie_plain_without_tls() {
+    let agent = Agent::start().await;
+    let cookie = agent.enter("duty", SECRET).await.expect("куки нет");
+    assert!(!cookie.contains("Secure"), "{cookie}");
 }
 
 #[tokio::test]

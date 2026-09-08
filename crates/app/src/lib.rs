@@ -14,6 +14,7 @@ pub mod reporter;
 pub mod rig;
 pub mod scribe;
 pub mod session;
+pub mod tls;
 pub mod view;
 pub mod watcher;
 pub mod web;

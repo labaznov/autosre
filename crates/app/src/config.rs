@@ -108,8 +108,45 @@ pub struct File {
     pub corpus: Corpus,
     #[serde(default)]
     pub retention: Retention,
+    #[serde(default)]
+    pub tls: Tls,
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
+}
+
+/// Встроенный TLS веб-морды.
+///
+/// Включён по умолчанию: пароль по голому HTTP виден в сети. Пути указывают
+/// на свой сертификат; если по ним ничего нет, агент делает самоподписанный
+/// и кладёт туда же.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Tls {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_cert")]
+    pub cert: PathBuf,
+    #[serde(default = "default_key")]
+    pub key: PathBuf,
+    #[serde(flatten)]
+    rest: BTreeMap<String, toml::Value>,
+}
+
+impl Default for Tls {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            cert: default_cert(),
+            key: default_key(),
+            rest: BTreeMap::new(),
+        }
+    }
+}
+
+fn default_cert() -> PathBuf {
+    PathBuf::from("/opt/data/autosre/tls/cert.pem")
+}
+fn default_key() -> PathBuf {
+    PathBuf::from("/opt/data/autosre/tls/key.pem")
 }
 
 /// Источник логов.
@@ -413,6 +450,7 @@ impl File {
         collect("knowledge", &self.knowledge.rest, &mut found);
         collect("corpus", &self.corpus.rest, &mut found);
         collect("retention", &self.retention.rest, &mut found);
+        collect("tls", &self.tls.rest, &mut found);
         for horizon in &self.horizons {
             collect(
                 &format!("horizon.{}", horizon.name),

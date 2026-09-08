@@ -20,6 +20,11 @@ async-trait = "0.1"
 base64 = "0.22"
 hmac = "0.12"
 axum = { version = "0.8", default-features = false, features = ["form", "http1", "json", "query", "tokio"] }
+# TLS без aws-lc: провайдер ring уже в дереве через reqwest, а aws-lc тянет
+# cmake и не собирается статически под musl без плясок.
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 humantime = "2"
 humantime-serde = "1"
 chrono.workspace = true

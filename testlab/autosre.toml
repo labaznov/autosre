@@ -7,6 +7,10 @@
 bind = "0.0.0.0:8096"
 database = "/opt/data/autosre/autosre.db"
 
+# В лаборатории голый HTTP: проверяется конвейер, а не браузерные предупреждения.
+[tls]
+enabled = false
+
 [logs]
 url = "http://victorialogs:9428"
 timeout = "30s"
