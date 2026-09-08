@@ -12,14 +12,16 @@
 > **It never fixes anything and never touches your hosts.** When data is out of
 > reach it asks a human to run a read-only command and waits for the answer.
 >
-> Rust 2024, ten crates, 417 tests, `clippy::pedantic` clean. Works end to end
+> Rust 2024, ten crates, 489 tests, `clippy::pedantic` clean. Works end to end
 > on the bundled test lab; **not yet calibrated on production data**. Try it
 > with `cd testlab && make up && make agent`, then open
 > `http://127.0.0.1:8096/` and log in as `duty` / `autosre-lab`.
 >
 > Everything else — code comments, docs, and the web UI — is in Russian, and
 > that is deliberate: this is a tool for a Russian-speaking on-call team.
-> Design rationale lives in [`docs/adr/`](docs/adr/README.md), 27 decisions
+> Deploys as a single static binary under systemd from a tarball, no Docker
+> and no network needed on the server.
+> Design rationale lives in [`docs/adr/`](docs/adr/README.md), 28 decisions
 > with the alternatives that were rejected and why.
 
 Второй контур диагностики: агент смотрит логи и метрики, замечает отклонения,
@@ -54,7 +56,7 @@
 сделать после развёртывания, — неделя работы и калибровка; для этого агент
 умеет копить корпус живых данных и мерить время до обнаружения и до вывода.
 
-Rust 2024, десять крейтов, 417 тестов, `clippy::pedantic` без предупреждений.
+Rust 2024, десять крейтов, 489 тестов, `clippy::pedantic` без предупреждений.
 
 ## Попробовать
 
@@ -71,8 +73,13 @@ make agent     # агент поверх них
 
 ## Развернуть
 
-Роль Ansible в [`deploy/autosre/`](deploy/autosre/README.md): образ на
-Alpine, обновление с остановкой, настройки в TOML, секреты из окружения.
+Один статический бинарь под systemd, без Docker и без сети на сервере: тарбол
+из [Releases](https://github.com/labaznov/autosre/releases), `sudo
+./install.sh`, три секрета, `autosre check`, `systemctl start`. Пошагово —
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md) §4, устройство бандла —
+[`bundle/README.md`](bundle/README.md) и
+[ADR-0028](docs/adr/0028-bundle-and-systemd.md). Кому нужен контейнер,
+`Dockerfile` собирает тот же бинарь.
 
 ## Документы
 
@@ -93,7 +100,7 @@ Alpine, обновление с остановкой, настройки в TOML
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | что нужно до установки, расчёт ресурсов, подключение модели, первый день, что открыто наружу, резервное копирование, обновление и откат, разбор отказов |
 | [`docs/DUTY.md`](docs/DUTY.md) | страницы веб-морды, что делает дежурный и что означает каждое действие, как читать карточку, чего от агента не ждать |
 | [`docs/METRICS.md`](docs/METRICS.md) | все 20 метрик с пояснениями, запросы для процентилей приёмки, с чего начать алерты |
-| [`deploy/autosre/README.md`](deploy/autosre/README.md) | роль Ansible: переменные, запуск, обновление, HTTPS |
+| [`bundle/README.md`](bundle/README.md) | установка из бандла на одну страницу: что на сервере, установка, обновление, откат |
 | [`examples/autosre.toml`](examples/autosre.toml) | все настройки с пояснениями, годится как образец для стенда |
 | [`testlab/README.md`](testlab/README.md) | тестовая лаборатория: что генерируется, какие сценарии, как смотреть |
 
@@ -102,7 +109,7 @@ Alpine, обновление с остановкой, настройки в TOML
 | Файл | О чём |
 | :--- | :--- |
 | [`docs/SPEC.md`](docs/SPEC.md) | задача, масштаб, словарь терминов, конвейер, горизонты, отчёты, критерии приёмки |
-| [`docs/adr/`](docs/adr/README.md) | 27 решений с отвергнутыми вариантами: [два контура](docs/adr/0001-two-contours.md), [скиллы как markdown](docs/adr/0003-skills-as-markdown.md), [минутный бакет](docs/adr/0013-minute-buckets.md), [заявка вместо SSH](docs/adr/0011-diagnostic-requests.md), [приглушение](docs/adr/0019-muting-instead-of-per-service-thresholds.md), [сбор живых данных](docs/adr/0027-live-corpus.md) |
+| [`docs/adr/`](docs/adr/README.md) | 28 решений с отвергнутыми вариантами: [два контура](docs/adr/0001-two-contours.md), [скиллы как markdown](docs/adr/0003-skills-as-markdown.md), [минутный бакет](docs/adr/0013-minute-buckets.md), [заявка вместо SSH](docs/adr/0011-diagnostic-requests.md), [приглушение](docs/adr/0019-muting-instead-of-per-service-thresholds.md), [сбор живых данных](docs/adr/0027-live-corpus.md) |
 | [`docs/NAMES.md`](docs/NAMES.md) | термин из словаря в имя типа, таблицы и поля, плюс запрещённые синонимы |
 | [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) | устройство репозитория знаний: форма скиллов, заметок, черновиков и отчётов |
 | [`examples/knowledge/`](examples/knowledge/README.md) | рабочий образец репозитория знаний: пять скиллов, две заметки, черновик, отчёты |
@@ -130,7 +137,8 @@ Alpine, обновление с остановкой, настройки в TOML
 markdown в git, который пишут сами SRE, а не разработчики агента.
 
 Стек: Rust, VictoriaLogs и VictoriaMetrics, локальная модель за
-OpenAI-совместимым API, выкладка Ansible. Коннекторы — за одним узким трейтом,
+OpenAI-совместимым API, выкладка тарболом под systemd. Коннекторы — за одним
+узким трейтом,
 второй источник лёг без правок первого.
 
 ## Лицензия

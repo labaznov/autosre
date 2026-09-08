@@ -1,5 +1,7 @@
-# Образ агента. Секретов внутри нет и быть не может: они приходят из окружения
-# ([ADR-0025](docs/adr/0025-config-file-and-secrets.md)).
+# Образ агента для тех, у кого всё живёт в контейнерах. Основной способ
+# выкладки — бандл под systemd ([ADR-0028](docs/adr/0028-bundle-and-systemd.md)),
+# образ собирает тот же статический бинарь. Секретов внутри нет и быть не
+# может: они приходят из окружения ([ADR-0025](docs/adr/0025-config-file-and-secrets.md)).
 
 FROM rust:1.97-alpine AS build
 RUN apk add --no-cache build-base
