@@ -170,7 +170,6 @@ impl Card {
             state: match incident.state {
                 State::Open => "идёт",
                 State::Closed => "закрыт",
-                State::Abandoned => "без разбора",
                 State::Merged => "влит в другой",
             },
             open: incident.state == State::Open,

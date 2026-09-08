@@ -108,9 +108,6 @@ collect = true
 # маскируются: корпус уезжает из контура.
 raw = false
 
-[queue]
-parallel = 2
-patience = "15m"
 
 [retention]
 minute_buckets = "7d"

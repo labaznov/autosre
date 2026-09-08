@@ -107,8 +107,6 @@ pub struct File {
     #[serde(default)]
     pub corpus: Corpus,
     #[serde(default)]
-    pub queue: Queue,
-    #[serde(default)]
     pub retention: Retention,
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
@@ -324,18 +322,6 @@ pub struct Knowledge {
     rest: BTreeMap<String, toml::Value>,
 }
 
-/// Очередь расследований.
-#[derive(Debug, Deserialize)]
-pub struct Queue {
-    #[serde(default = "default_parallel")]
-    pub parallel: usize,
-    /// Сколько подозрение ждёт разбора, прежде чем дойти до дежурного без вывода.
-    #[serde(default = "default_patience", with = "humantime_serde")]
-    pub patience: Duration,
-    #[serde(flatten)]
-    rest: BTreeMap<String, toml::Value>,
-}
-
 /// Сроки хранения.
 #[derive(Debug, Deserialize)]
 pub struct Retention {
@@ -406,7 +392,7 @@ impl File {
                 "размер куска дозапроса равен нулю: просить будет нечего".to_owned(),
             ));
         }
-        if self.digging.parallel == 0 || self.queue.parallel == 0 {
+        if self.digging.parallel == 0 {
             return Err(ConfigError::Invalid(
                 "потолок одновременных расследований равен нулю: разбирать будет некому".to_owned(),
             ));
@@ -426,7 +412,6 @@ impl File {
         collect("digging", &self.digging.rest, &mut found);
         collect("knowledge", &self.knowledge.rest, &mut found);
         collect("corpus", &self.corpus.rest, &mut found);
-        collect("queue", &self.queue.rest, &mut found);
         collect("retention", &self.retention.rest, &mut found);
         for horizon in &self.horizons {
             collect(
@@ -564,16 +549,6 @@ impl Default for Knowledge {
             refresh: default_refresh(),
             recall: default_recall(),
             worth: default_worth(),
-            rest: BTreeMap::new(),
-        }
-    }
-}
-
-impl Default for Queue {
-    fn default() -> Self {
-        Self {
-            parallel: default_parallel(),
-            patience: default_patience(),
             rest: BTreeMap::new(),
         }
     }

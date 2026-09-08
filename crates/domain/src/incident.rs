@@ -70,8 +70,6 @@ pub enum State {
     Open,
     /// Закрыт тишиной или человеком.
     Closed,
-    /// Дежурный не знал, что с ним делать: закрыт без разбора.
-    Abandoned,
     /// Влит в другой инцидент: дежурный решил, что это одно и то же.
     Merged,
 }
@@ -82,7 +80,6 @@ impl State {
         match self {
             Self::Open => "open",
             Self::Closed => "closed",
-            Self::Abandoned => "abandoned",
             Self::Merged => "merged",
         }
     }
@@ -91,7 +88,6 @@ impl State {
     pub fn of(text: &str) -> Self {
         match text {
             "closed" => Self::Closed,
-            "abandoned" => Self::Abandoned,
             "merged" => Self::Merged,
             _ => Self::Open,
         }

@@ -146,9 +146,18 @@ fn names_the_unknown_setting() {
 #[test]
 fn names_the_unknown_setting_of_a_section() {
     let settings = Settings::of(&format!(
-        "{ENOUGH}\n[queue]\nparallel = 2\nspeed = \"much\"\n"
+        "{ENOUGH}\n[digging]\nparallel = 2\nspeed = \"much\"\n"
     ));
-    assert_eq!(settings.read(&full()).unwrap().unknown, vec!["queue.speed"]);
+    assert_eq!(
+        settings.read(&full()).unwrap().unknown,
+        vec!["digging.speed"]
+    );
+}
+
+#[test]
+fn names_the_gone_queue_section() {
+    let settings = Settings::of(&format!("{ENOUGH}\n[queue]\nparallel = 2\n"));
+    assert_eq!(settings.read(&full()).unwrap().unknown, vec!["queue"]);
 }
 
 #[test]
@@ -189,7 +198,7 @@ fn refuses_a_period_wider_than_the_window() {
 
 #[test]
 fn refuses_a_queue_without_slots() {
-    let settings = Settings::of(&format!("{ENOUGH}\n[queue]\nparallel = 0\n"));
+    let settings = Settings::of(&format!("{ENOUGH}\n[digging]\nparallel = 0\n"));
     assert!(matches!(
         settings.read(&full()).unwrap_err(),
         ConfigError::Invalid(_)
