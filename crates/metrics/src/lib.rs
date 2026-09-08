@@ -52,6 +52,8 @@ pub struct Metrics {
     instant: Url,
     select: Vec<String>,
     labels: Vec<String>,
+    /// Паузы между попытками при проходящем отказе; пусто — одна попытка.
+    pauses: Vec<Duration>,
 }
 
 impl Metrics {
@@ -76,7 +78,47 @@ impl Metrics {
                 .map_err(|cause| transport(&cause))?,
             select: settings.select.clone(),
             labels: settings.labels.clone(),
+            pauses: Vec::new(),
         })
+    }
+
+    /// Тот же коннектор, повторяющий запрос после обрыва связи или занятого
+    /// источника. Таймаут и отказ разобрать запрос не повторяются.
+    #[must_use]
+    pub fn retrying(self, pauses: &[Duration]) -> Self {
+        Self {
+            pauses: pauses.to_vec(),
+            ..self
+        }
+    }
+
+    /// Один запрос к источнику с повторами; отвечает телом успешного ответа.
+    async fn fetch(&self, endpoint: &Url, params: &[(&str, &str)]) -> Result<String, SourceError> {
+        let got = autosre_source::again(
+            &self.pauses,
+            |got: &Result<(reqwest::StatusCode, String), reqwest::Error>| match got {
+                Err(cause) => !cause.is_timeout(),
+                Ok((status, _)) => autosre_source::busy(status.as_u16()),
+            },
+            || {
+                let request = self.http.get(endpoint.clone()).query(params);
+                async move {
+                    let response = request.send().await?;
+                    let status = response.status();
+                    Ok((status, response.text().await?))
+                }
+            },
+        )
+        .await;
+        let (status, body) = got.map_err(|cause| transport(&cause))?;
+        if status.is_success() {
+            Ok(body)
+        } else {
+            Err(SourceError::Status {
+                status: status.as_u16(),
+                body: clip(&body),
+            })
+        }
     }
 
     /// Запрос одной серии за промежуток с шагом в минуту.
@@ -105,26 +147,17 @@ impl Source for Metrics {
         for series in &self.select {
             let query = self.query(series);
             tracing::debug!(query, minutes = span.len(), "запрос к метрикам");
-            let response = self
-                .http
-                .get(self.endpoint.clone())
-                .query(&[
-                    ("query", query.as_str()),
-                    ("start", &span.from().stamp().to_string()),
-                    ("end", &span.to().stamp().to_string()),
-                    ("step", "60"),
-                ])
-                .send()
-                .await
-                .map_err(|cause| transport(&cause))?;
-            let status = response.status();
-            let body = response.text().await.map_err(|cause| transport(&cause))?;
-            if !status.is_success() {
-                return Err(SourceError::Status {
-                    status: status.as_u16(),
-                    body: clip(&body),
-                });
-            }
+            let body = self
+                .fetch(
+                    &self.endpoint,
+                    &[
+                        ("query", query.as_str()),
+                        ("start", &span.from().stamp().to_string()),
+                        ("end", &span.to().stamp().to_string()),
+                        ("step", "60"),
+                    ],
+                )
+                .await?;
             all.extend(read(&body, series, series.ends_with("_total"))?);
         }
         tracing::info!(
@@ -146,24 +179,15 @@ impl Source for Metrics {
     ) -> Result<Vec<String>, SourceError> {
         let query = text.replace(&format!("{SERIES}="), "__name__=");
         tracing::debug!(query, "запрос скилла к метрикам");
-        let response = self
-            .http
-            .get(self.instant.clone())
-            .query(&[
-                ("query", query.as_str()),
-                ("time", &span.to().stamp().to_string()),
-            ])
-            .send()
-            .await
-            .map_err(|cause| transport(&cause))?;
-        let status = response.status();
-        let body = response.text().await.map_err(|cause| transport(&cause))?;
-        if !status.is_success() {
-            return Err(SourceError::Status {
-                status: status.as_u16(),
-                body: clip(&body),
-            });
-        }
+        let body = self
+            .fetch(
+                &self.instant,
+                &[
+                    ("query", query.as_str()),
+                    ("time", &span.to().stamp().to_string()),
+                ],
+            )
+            .await?;
         let mut lines = lines(&body)?;
         lines.truncate(limit);
         Ok(lines)

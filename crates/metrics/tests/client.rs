@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,6 +17,9 @@ struct Reply {
     seen: Arc<Mutex<Vec<String>>>,
     status: StatusCode,
     body: &'static str,
+    failures: Arc<AtomicUsize>,
+    /// Каким кодом отбивать первые запросы.
+    busy: StatusCode,
 }
 
 /// Поддельная `VictoriaMetrics` на эфемерном порту.
@@ -26,6 +30,19 @@ struct Fake {
 
 impl Fake {
     async fn start(status: StatusCode, body: &'static str) -> Self {
+        Self::stand(status, body, (0, status)).await
+    }
+
+    /// Источник, отбивающий первые `fails` запросов кодом `status`.
+    async fn flaky(fails: usize, status: StatusCode, body: &'static str) -> Self {
+        Self::stand(StatusCode::OK, body, (fails, status)).await
+    }
+
+    async fn stand(
+        status: StatusCode,
+        body: &'static str,
+        (fails, busy): (usize, StatusCode),
+    ) -> Self {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -38,6 +55,8 @@ impl Fake {
                 seen: Arc::clone(&seen),
                 status,
                 body,
+                failures: Arc::new(AtomicUsize::new(fails)),
+                busy,
             });
         tokio::spawn(async move {
             axum::serve(listener, router).await.expect("сервер упал");
@@ -71,7 +90,29 @@ async fn answer(
         .lock()
         .expect("журнал заблокирован")
         .push(params.get("query").cloned().unwrap_or_default());
+    if reply
+        .failures
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+            left.checked_sub(1)
+        })
+        .is_ok()
+    {
+        return (reply.busy, "busy".to_owned());
+    }
     (reply.status, reply.body.to_owned())
+}
+
+const QUICK: [Duration; 2] = [Duration::from_millis(5), Duration::from_millis(5)];
+
+#[tokio::test]
+async fn tries_again_after_a_busy_source() {
+    let fake = Fake::flaky(1, StatusCode::SERVICE_UNAVAILABLE, MEMORY).await;
+    let buckets = fake
+        .metrics(&["process_resident_memory_bytes"])
+        .retrying(&QUICK)
+        .buckets(quarter())
+        .await;
+    assert!(buckets.is_ok(), "{buckets:?}");
 }
 
 /// Мгновенный запрос запоминается вместе с моментом: `запрос@время`.

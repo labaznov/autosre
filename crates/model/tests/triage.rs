@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,6 +17,10 @@ struct Reply {
     status: StatusCode,
     body: &'static str,
     delay: Duration,
+    /// Сколько первых запросов отбить кодом `status`, прежде чем ответить.
+    failures: Arc<AtomicUsize>,
+    /// Каким кодом отбивать первые запросы.
+    busy: StatusCode,
 }
 
 /// Поддельный `LiteLLM` на эфемерном порту.
@@ -30,6 +35,20 @@ impl Fake {
     }
 
     async fn slow(status: StatusCode, body: &'static str, delay: Duration) -> Self {
+        Self::stand(status, body, delay, (0, status)).await
+    }
+
+    /// Модель, отбивающая первые `fails` запросов кодом `status`.
+    async fn flaky(fails: usize, status: StatusCode, body: &'static str) -> Self {
+        Self::stand(StatusCode::OK, body, Duration::ZERO, (fails, status)).await
+    }
+
+    async fn stand(
+        status: StatusCode,
+        body: &'static str,
+        delay: Duration,
+        (fails, busy): (usize, StatusCode),
+    ) -> Self {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -42,6 +61,8 @@ impl Fake {
                 status,
                 body,
                 delay,
+                failures: Arc::new(AtomicUsize::new(fails)),
+                busy,
             });
         tokio::spawn(async move {
             axum::serve(listener, router).await.expect("сервер упал");
@@ -51,6 +72,10 @@ impl Fake {
 
     fn asked(&self) -> Value {
         self.seen.lock().expect("журнал заблокирован")[0].clone()
+    }
+
+    fn count(&self) -> usize {
+        self.seen.lock().expect("журнал заблокирован").len()
     }
 
     fn model(&self, timeout: Duration) -> Model {
@@ -75,7 +100,70 @@ async fn answer(State(reply): State<Reply>, body: String) -> (StatusCode, String
         .expect("журнал заблокирован")
         .push(serde_json::from_str(&body).unwrap_or(Value::Null));
     tokio::time::sleep(reply.delay).await;
+    if reply
+        .failures
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+            left.checked_sub(1)
+        })
+        .is_ok()
+    {
+        return (reply.busy, "busy".to_owned());
+    }
     (reply.status, reply.body.to_owned())
+}
+
+/// Паузы между попытками, годные для теста.
+const QUICK: [Duration; 2] = [Duration::from_millis(5), Duration::from_millis(5)];
+
+#[tokio::test]
+async fn tries_again_after_a_busy_gateway() {
+    let fake = Fake::flaky(1, StatusCode::SERVICE_UNAVAILABLE, WORTH).await;
+    let about = prompt::about(&deviation(), "orders-api", &groups());
+    let triage = fake
+        .model(Duration::from_secs(5))
+        .retrying(&QUICK)
+        .triage(&about)
+        .await;
+    assert!(triage.is_ok(), "{triage:?}");
+}
+
+#[tokio::test]
+async fn gives_up_after_the_pauses_run_out() {
+    let fake = Fake::flaky(5, StatusCode::SERVICE_UNAVAILABLE, WORTH).await;
+    let about = prompt::about(&deviation(), "orders-api", &groups());
+    let failure = fake
+        .model(Duration::from_secs(5))
+        .retrying(&QUICK)
+        .triage(&about)
+        .await
+        .unwrap_err();
+    assert!(matches!(failure, ModelError::Status { status: 503, .. }));
+    assert_eq!(fake.count(), 3);
+}
+
+#[tokio::test]
+async fn does_not_try_again_on_a_bad_request() {
+    let fake = Fake::flaky(1, StatusCode::BAD_REQUEST, WORTH).await;
+    let about = prompt::about(&deviation(), "orders-api", &groups());
+    let _ = fake
+        .model(Duration::from_secs(5))
+        .retrying(&QUICK)
+        .triage(&about)
+        .await;
+    assert_eq!(fake.count(), 1);
+}
+
+#[tokio::test]
+async fn does_not_try_again_on_a_thinking_model() {
+    let fake = Fake::slow(StatusCode::OK, WORTH, Duration::from_secs(30)).await;
+    let about = prompt::about(&deviation(), "orders-api", &groups());
+    let _ = fake
+        .model(Duration::from_millis(150))
+        .retrying(&QUICK)
+        .triage(&about)
+        .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(fake.count(), 1);
 }
 
 const WORTH: &str = r#"{"choices":[{"message":{"content":"{\"worth\":true,\"because\":\"такого раньше не было\"}"}}]}"#;

@@ -9,6 +9,11 @@ license.workspace = true
 async-trait = "0.1"
 autosre-domain = { path = "../domain" }
 thiserror.workspace = true
+tokio = { version = "1", features = ["time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

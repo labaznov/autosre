@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use autosre_app::config::{Config, Process};
 use autosre_app::metrics::Metrics;
@@ -15,6 +16,10 @@ use tracing_subscriber::EnvFilter;
 
 /// Путь к файлу настроек по умолчанию.
 const CONFIG: &str = "/etc/autosre/autosre.toml";
+
+/// Паузы между попытками после обрыва связи или занятого шлюза: две попытки
+/// сверх первой. Дольше ждать незачем — минуту спустя съём придёт снова.
+const PAUSES: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(5)];
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -105,7 +110,8 @@ async fn serve() -> Result<(), Failure> {
         temperature: config.file.model.temperature,
         tokens: config.file.model.max_tokens,
         timeout: config.file.model.timeout,
-    })?;
+    })?
+    .retrying(&PAUSES);
     let model = Arc::new(if config.file.corpus.collect {
         tracing::info!(
             raw = config.file.corpus.raw,
@@ -183,26 +189,31 @@ async fn serve() -> Result<(), Failure> {
 /// Оба за одной границей ([ADR-0004](../../../docs/adr/0004-connectors-as-features.md)),
 /// поэтому дальше по коду они неразличимы.
 fn sources(config: &Config) -> Result<Vec<Arc<dyn Source>>, Failure> {
-    let logs: Arc<dyn Source> = Arc::new(Logs::new(
-        &autosre_logs::Settings {
-            url: config.file.logs.url.parse()?,
-            username: config.file.logs.username.clone(),
-            password: config.secrets.logs_password.clone(),
-            timeout: config.file.logs.timeout,
-            rows: 2000,
-        },
-        Filter::new(
-            &config.file.logs.error_pattern,
-            config.file.logs.self_streams.clone(),
-        )?,
-    )?);
-    let numbers: Arc<dyn Source> =
-        Arc::new(autosre_metrics::Metrics::new(&autosre_metrics::Settings {
+    let logs: Arc<dyn Source> = Arc::new(
+        Logs::new(
+            &autosre_logs::Settings {
+                url: config.file.logs.url.parse()?,
+                username: config.file.logs.username.clone(),
+                password: config.secrets.logs_password.clone(),
+                timeout: config.file.logs.timeout,
+                rows: 2000,
+            },
+            Filter::new(
+                &config.file.logs.error_pattern,
+                config.file.logs.self_streams.clone(),
+            )?,
+        )?
+        .retrying(&PAUSES),
+    );
+    let numbers: Arc<dyn Source> = Arc::new(
+        autosre_metrics::Metrics::new(&autosre_metrics::Settings {
             url: config.file.metrics.url.parse()?,
             timeout: config.file.metrics.timeout,
             select: config.file.metrics.select.clone(),
             labels: config.file.incidents.service_labels.clone(),
-        })?);
+        })?
+        .retrying(&PAUSES),
+    );
     Ok(vec![logs, numbers])
 }
 

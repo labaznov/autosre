@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -26,6 +27,9 @@ struct Reply {
     status: StatusCode,
     body: &'static str,
     delay: Duration,
+    failures: Arc<AtomicUsize>,
+    /// Каким кодом отбивать первые запросы.
+    busy: StatusCode,
 }
 
 /// Поддельная `Victoria Logs` на эфемерном порту.
@@ -40,6 +44,20 @@ impl Fake {
     }
 
     async fn slow(status: StatusCode, body: &'static str, delay: Duration) -> Self {
+        Self::stand(status, body, delay, (0, status)).await
+    }
+
+    /// Источник, отбивающий первые `fails` запросов кодом `status`.
+    async fn flaky(fails: usize, status: StatusCode, body: &'static str) -> Self {
+        Self::stand(StatusCode::OK, body, Duration::ZERO, (fails, status)).await
+    }
+
+    async fn stand(
+        status: StatusCode,
+        body: &'static str,
+        delay: Duration,
+        (fails, busy): (usize, StatusCode),
+    ) -> Self {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -52,6 +70,8 @@ impl Fake {
                 status,
                 body,
                 delay,
+                failures: Arc::new(AtomicUsize::new(fails)),
+                busy,
             });
         tokio::spawn(async move {
             axum::serve(listener, router).await.expect("сервер упал");
@@ -94,7 +114,40 @@ async fn answer(
             .map(ToOwned::to_owned),
     });
     tokio::time::sleep(reply.delay).await;
+    if reply
+        .failures
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+            left.checked_sub(1)
+        })
+        .is_ok()
+    {
+        return (reply.busy, "busy".to_owned());
+    }
     (reply.status, reply.body.to_owned())
+}
+
+const QUICK: [Duration; 2] = [Duration::from_millis(5), Duration::from_millis(5)];
+
+#[tokio::test]
+async fn tries_again_after_a_busy_source() {
+    let fake = Fake::flaky(1, StatusCode::BAD_GATEWAY, COUNTS).await;
+    let buckets = fake
+        .logs(Duration::from_secs(5), "")
+        .retrying(&QUICK)
+        .buckets(quarter())
+        .await;
+    assert!(buckets.is_ok(), "{buckets:?}");
+}
+
+#[tokio::test]
+async fn does_not_try_again_on_a_refused_query() {
+    let fake = Fake::flaky(1, StatusCode::BAD_REQUEST, COUNTS).await;
+    let _ = fake
+        .logs(Duration::from_secs(5), "")
+        .retrying(&QUICK)
+        .buckets(quarter())
+        .await;
+    assert_eq!(fake.seen().len(), 1);
 }
 
 fn moment(text: &str) -> DateTime<Utc> {

@@ -44,6 +44,8 @@ pub struct Logs {
     password: String,
     filter: Filter,
     rows: usize,
+    /// Паузы между попытками при проходящем отказе; пусто — одна попытка.
+    pauses: Vec<Duration>,
 }
 
 impl Logs {
@@ -66,7 +68,18 @@ impl Logs {
             password: settings.password.clone(),
             filter,
             rows: settings.rows,
+            pauses: Vec::new(),
         })
+    }
+
+    /// Тот же коннектор, повторяющий запрос после обрыва связи или занятого
+    /// источника. Таймаут и отказ разобрать запрос не повторяются.
+    #[must_use]
+    pub fn retrying(self, pauses: &[Duration]) -> Self {
+        Self {
+            pauses: pauses.to_vec(),
+            ..self
+        }
     }
 }
 
@@ -121,16 +134,29 @@ impl Logs {
     /// Один запрос к источнику.
     async fn ask(&self, query: &str, limit: usize) -> Result<String, SourceError> {
         tracing::debug!(query, limit, "запрос к логам");
-        let mut request = self
-            .http
-            .get(self.endpoint.clone())
-            .query(&[("query", query), ("limit", &limit.to_string())]);
-        if !self.username.is_empty() {
-            request = request.basic_auth(&self.username, Some(&self.password));
-        }
-        let response = request.send().await.map_err(|cause| transport(&cause))?;
-        let status = response.status();
-        let body = response.text().await.map_err(|cause| transport(&cause))?;
+        let got = autosre_source::again(
+            &self.pauses,
+            |got: &Result<(reqwest::StatusCode, String), reqwest::Error>| match got {
+                Err(cause) => !cause.is_timeout(),
+                Ok((status, _)) => autosre_source::busy(status.as_u16()),
+            },
+            || {
+                let mut request = self
+                    .http
+                    .get(self.endpoint.clone())
+                    .query(&[("query", query), ("limit", &limit.to_string())]);
+                if !self.username.is_empty() {
+                    request = request.basic_auth(&self.username, Some(&self.password));
+                }
+                async move {
+                    let response = request.send().await?;
+                    let status = response.status();
+                    Ok((status, response.text().await?))
+                }
+            },
+        )
+        .await;
+        let (status, body) = got.map_err(|cause| transport(&cause))?;
         if status.is_success() {
             Ok(body)
         } else {

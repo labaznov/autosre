@@ -116,6 +116,8 @@ pub struct Model {
     endpoint: Url,
     settings: Settings,
     ledger: Option<Arc<dyn Ledger>>,
+    /// Паузы между попытками при проходящем отказе; пусто — одна попытка.
+    pauses: Vec<Duration>,
 }
 
 impl Model {
@@ -136,7 +138,19 @@ impl Model {
                 .map_err(|cause| ModelError::Transport(cause.to_string()))?,
             settings,
             ledger: None,
+            pauses: Vec::new(),
         })
+    }
+
+    /// Тот же клиент, повторяющий запрос после обрыва связи или занятого
+    /// шлюза. Таймаут не повторяется: думающей модели вторая попытка только
+    /// добавит работы.
+    #[must_use]
+    pub fn retrying(self, pauses: &[Duration]) -> Self {
+        Self {
+            pauses: pauses.to_vec(),
+            ..self
+        }
     }
 
     /// Тот же клиент, записывающий каждый заход.
@@ -198,28 +212,37 @@ impl Model {
             chars = user.len(),
             "запрос к модели"
         );
-        let response = self
-            .http
-            .post(self.endpoint.clone())
-            .bearer_auth(&self.settings.key)
-            .json(&json!({
-                "model": self.settings.name,
-                "temperature": self.settings.temperature,
-                "max_tokens": self.settings.tokens,
-                "response_format": schema,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user}
-                ]
-            }))
-            .send()
-            .await
-            .map_err(|cause| ModelError::Transport(cause.to_string()))?;
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|cause| ModelError::Transport(cause.to_string()))?;
+        let body = json!({
+            "model": self.settings.name,
+            "temperature": self.settings.temperature,
+            "max_tokens": self.settings.tokens,
+            "response_format": schema,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ]
+        });
+        let got = autosre_source::again(
+            &self.pauses,
+            |got: &Result<(reqwest::StatusCode, String), reqwest::Error>| match got {
+                Err(cause) => !cause.is_timeout(),
+                Ok((status, _)) => autosre_source::busy(status.as_u16()),
+            },
+            || {
+                let request = self
+                    .http
+                    .post(self.endpoint.clone())
+                    .bearer_auth(&self.settings.key)
+                    .json(&body);
+                async move {
+                    let response = request.send().await?;
+                    let status = response.status();
+                    Ok((status, response.text().await?))
+                }
+            },
+        )
+        .await;
+        let (status, body) = got.map_err(|cause| ModelError::Transport(cause.to_string()))?;
         if !status.is_success() {
             return Err(ModelError::Status {
                 status: status.as_u16(),

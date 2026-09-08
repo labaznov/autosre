@@ -10,6 +10,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde.workspace = true
 serde_json.workspace = true
 autosre-domain = { path = "../domain" }
+autosre-source = { path = "../source" }
 thiserror.workspace = true
 tracing.workspace = true
 url = "2"
