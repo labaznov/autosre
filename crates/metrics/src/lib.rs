@@ -153,7 +153,9 @@ impl Source for Metrics {
                     &[
                         ("query", query.as_str()),
                         ("start", &span.from().stamp().to_string()),
-                        ("end", &span.to().stamp().to_string()),
+                        // Конец у `query_range` включительный, у промежутка нет:
+                        // просим до последней минуты, иначе придёт лишняя.
+                        ("end", &span.to().previous().stamp().to_string()),
                         ("step", "60"),
                     ],
                 )

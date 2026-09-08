@@ -15,6 +15,8 @@ use axum::routing::get;
 #[derive(Clone)]
 struct Reply {
     seen: Arc<Mutex<Vec<String>>>,
+    /// Концы запрошенных отрезков: у `query_range` конец включительный.
+    ends: Arc<Mutex<Vec<String>>>,
     status: StatusCode,
     body: &'static str,
     failures: Arc<AtomicUsize>,
@@ -26,6 +28,7 @@ struct Reply {
 struct Fake {
     address: SocketAddr,
     seen: Arc<Mutex<Vec<String>>>,
+    ends: Arc<Mutex<Vec<String>>>,
 }
 
 impl Fake {
@@ -44,6 +47,7 @@ impl Fake {
         (fails, busy): (usize, StatusCode),
     ) -> Self {
         let seen = Arc::new(Mutex::new(Vec::new()));
+        let ends = Arc::new(Mutex::new(Vec::new()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("порт не занят");
@@ -53,6 +57,7 @@ impl Fake {
             .route("/api/v1/query", get(instant))
             .with_state(Reply {
                 seen: Arc::clone(&seen),
+                ends: Arc::clone(&ends),
                 status,
                 body,
                 failures: Arc::new(AtomicUsize::new(fails)),
@@ -61,7 +66,11 @@ impl Fake {
         tokio::spawn(async move {
             axum::serve(listener, router).await.expect("сервер упал");
         });
-        Self { address, seen }
+        Self {
+            address,
+            seen,
+            ends,
+        }
     }
 
     fn seen(&self) -> Vec<String> {
@@ -90,6 +99,11 @@ async fn answer(
         .lock()
         .expect("журнал заблокирован")
         .push(params.get("query").cloned().unwrap_or_default());
+    reply
+        .ends
+        .lock()
+        .expect("журнал заблокирован")
+        .push(params.get("end").cloned().unwrap_or_default());
     if reply
         .failures
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
@@ -150,6 +164,18 @@ async fn reads_a_value_for_every_minute() {
         .await
         .unwrap();
     assert_eq!(buckets.len(), 2);
+}
+
+#[tokio::test]
+async fn does_not_ask_for_the_minute_past_the_span() {
+    let fake = Fake::start(StatusCode::OK, MEMORY).await;
+    fake.metrics(&["process_resident_memory_bytes"])
+        .buckets(quarter())
+        .await
+        .unwrap();
+    // Конец у query_range включительный, а у промежутка — нет: просить надо
+    // до последней минуты промежутка, иначе источник отдаёт лишнюю.
+    assert_eq!(fake.ends.lock().unwrap()[0], "1786968840");
 }
 
 #[tokio::test]
