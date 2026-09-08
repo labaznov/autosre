@@ -260,7 +260,16 @@ async fn listen(config: &Config, shared: web::Shared) -> Result<(), Failure> {
 }
 
 /// Ждёт сигнала остановки, чтобы дорисовать текущие запросы.
+///
+/// Слушает и SIGINT, и SIGTERM: первый шлёт терминал, второй — systemd и
+/// Docker. Без второго остановка службы была бы убийством на месте, без
+/// дорисовки запросов и без строки в журнале.
 async fn stop() {
-    let _ = tokio::signal::ctrl_c().await;
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("подписка на SIGTERM не удалась");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
     tracing::info!("остановка по сигналу");
 }
