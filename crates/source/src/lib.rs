@@ -89,6 +89,20 @@ pub trait Source: Send + Sync {
     }
 }
 
+/// Отказ со всей цепочкой причин в одну строку: «запрос не отправлен:
+/// соединение отклонено», а не только верхнее звено.
+#[must_use]
+pub fn chain(failure: &dyn std::error::Error) -> String {
+    let mut text = failure.to_string();
+    let mut cause = failure.source();
+    while let Some(inner) = cause {
+        text.push_str(": ");
+        text.push_str(&inner.to_string());
+        cause = inner.source();
+    }
+    text
+}
+
 /// Код ответа, за которым стоит занятость, а не отказ: шлюз без свободных
 /// мест, прокси без живого бэкенда. Такое проходит само.
 #[must_use]

@@ -1,0 +1,37 @@
+# Юнит агента диагностики. Ставится скриптом install.sh из бандла
+# (docs/adr/0028-bundle-and-systemd.md).
+#
+# Restart=always вместе с panic = "abort" в сборке: паника любого фонового
+# цикла роняет процесс целиком, и systemd поднимает его заново. Состояние
+# переживает перезапуск, пропущенные минуты агент дозапросит сам.
+
+[Unit]
+Description=autosre: второй контур диагностики
+Documentation=https://github.com/labaznov/autosre
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autosre
+Group=autosre
+# Секреты — только здесь, в файле не бывают (docs/adr/0025-config-file-and-secrets.md).
+EnvironmentFile=/etc/autosre/autosre.env
+ExecStart=/usr/local/bin/autosre /etc/autosre/autosre.toml
+Restart=always
+RestartSec=5s
+# Остановка: SIGTERM, потом десять секунд на дорисовку текущих запросов.
+KillSignal=SIGTERM
+TimeoutStopSec=10s
+
+# Процесс пишет только в свой каталог данных; всё остальное ему только читать.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/data/autosre
+# Сертификат для встроенного TLS агент кладёт рядом с настройками.
+ReadWritePaths=/etc/autosre
+
+[Install]
+WantedBy=multi-user.target

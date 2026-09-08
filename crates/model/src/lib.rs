@@ -242,7 +242,8 @@ impl Model {
             },
         )
         .await;
-        let (status, body) = got.map_err(|cause| ModelError::Transport(cause.to_string()))?;
+        let (status, body) = got
+            .map_err(|cause| ModelError::Transport(autosre_source::chain(&cause.without_url())))?;
         if !status.is_success() {
             return Err(ModelError::Status {
                 status: status.as_u16(),

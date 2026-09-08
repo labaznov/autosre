@@ -67,15 +67,15 @@ impl Metrics {
             http: reqwest::Client::builder()
                 .timeout(settings.timeout)
                 .build()
-                .map_err(|cause| transport(&cause))?,
+                .map_err(|cause| SourceError::Transport(cause.to_string()))?,
             endpoint: settings
                 .url
                 .join(ENDPOINT)
-                .map_err(|cause| transport(&cause))?,
+                .map_err(|cause| SourceError::Transport(cause.to_string()))?,
             instant: settings
                 .url
                 .join(INSTANT)
-                .map_err(|cause| transport(&cause))?,
+                .map_err(|cause| SourceError::Transport(cause.to_string()))?,
             select: settings.select.clone(),
             labels: settings.labels.clone(),
             pauses: Vec::new(),
@@ -110,7 +110,7 @@ impl Metrics {
             },
         )
         .await;
-        let (status, body) = got.map_err(|cause| transport(&cause))?;
+        let (status, body) = got.map_err(transport)?;
         if status.is_success() {
             Ok(body)
         } else {
@@ -317,8 +317,10 @@ fn reading(value: &Value) -> Option<f64> {
         .filter(|number: &f64| number.is_finite())
 }
 
-fn transport(cause: &dyn std::fmt::Display) -> SourceError {
-    SourceError::Transport(cause.to_string())
+/// Отказ связи без адреса: адрес с запросом внутри — это строка на экран, а
+/// причина — в конце цепочки.
+fn transport(cause: reqwest::Error) -> SourceError {
+    SourceError::Transport(autosre_source::chain(&cause.without_url()))
 }
 
 fn clip(text: &str) -> String {

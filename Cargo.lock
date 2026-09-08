@@ -99,7 +99,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "autosre-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "askama",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "autosre-domain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "regex",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "autosre-knowledge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_yaml_ng",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "autosre-logs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "autosre-domain",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "autosre-metrics"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "autosre-domain",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "autosre-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "autosre-domain",
  "autosre-source",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "autosre-skills"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "autosre-domain",
  "regex",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "autosre-source"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "autosre-domain",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "autosre-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "autosre-domain",
  "chrono",

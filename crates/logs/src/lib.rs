@@ -59,11 +59,11 @@ impl Logs {
             http: reqwest::Client::builder()
                 .timeout(settings.timeout)
                 .build()
-                .map_err(|cause| transport(&cause))?,
+                .map_err(|cause| SourceError::Transport(cause.to_string()))?,
             endpoint: settings
                 .url
                 .join(ENDPOINT)
-                .map_err(|cause| transport(&cause))?,
+                .map_err(|cause| SourceError::Transport(cause.to_string()))?,
             username: settings.username.clone(),
             password: settings.password.clone(),
             filter,
@@ -156,7 +156,7 @@ impl Logs {
             },
         )
         .await;
-        let (status, body) = got.map_err(|cause| transport(&cause))?;
+        let (status, body) = got.map_err(transport)?;
         if status.is_success() {
             Ok(body)
         } else {
@@ -238,8 +238,10 @@ fn missing(row: &Map<String, Value>, field: &str) -> SourceError {
     ))
 }
 
-fn transport(cause: &dyn std::fmt::Display) -> SourceError {
-    SourceError::Transport(cause.to_string())
+/// Отказ связи без адреса: адрес с запросом внутри — это строка на экран, а
+/// причина — в конце цепочки.
+fn transport(cause: reqwest::Error) -> SourceError {
+    SourceError::Transport(autosre_source::chain(&cause.without_url()))
 }
 
 /// Обрезает текст для сообщения об ошибке: тела ответов в журнал не попадают.

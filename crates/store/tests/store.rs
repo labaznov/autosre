@@ -2209,3 +2209,29 @@ async fn reports_how_many_rows_it_forgot() {
         .unwrap();
     assert_eq!(gone, 2);
 }
+
+#[tokio::test]
+async fn copies_the_base_on_the_fly() {
+    let base = Base::open();
+    let at = minute("2026-08-17T10:00:00Z");
+    base.store
+        .save("logs", Span::single(at), vec![])
+        .await
+        .unwrap();
+    let copy = TempDir::new()
+        .unwrap()
+        .path()
+        .join("copies/autosre-copy.db");
+    base.store.backup(&copy).await.unwrap();
+    let restored = Store::open(&copy).unwrap();
+    assert_eq!(restored.snapped("logs").await.unwrap(), Some(at));
+}
+
+#[tokio::test]
+async fn refuses_to_copy_over_an_existing_file() {
+    let base = Base::open();
+    let taken = TempDir::new().unwrap();
+    let copy = taken.path().join("taken.db");
+    std::fs::write(&copy, "занято").unwrap();
+    assert!(base.store.backup(&copy).await.is_err());
+}

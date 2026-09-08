@@ -2173,6 +2173,28 @@ impl Store {
         .await
     }
 
+    /// Снимает копию базы на живом агенте средствами `SQLite`.
+    ///
+    /// Копировать файл под WAL нельзя: рядом лежат `-wal` и `-shm`, и копия
+    /// без них битая. `VACUUM INTO` пишет цельный файл и не мешает работе.
+    /// Поверх существующего файла не пишет: `SQLite` так не умеет, и это к
+    /// лучшему — резервная копия не должна затираться молча.
+    ///
+    /// # Errors
+    /// [`StoreError::Sqlite`], если файл уже есть, каталог недоступен или
+    /// копия не записана.
+    pub async fn backup(&self, target: &Path) -> Result<(), StoreError> {
+        if let Some(directory) = target.parent() {
+            std::fs::create_dir_all(directory)?;
+        }
+        let target = target.to_string_lossy().into_owned();
+        self.work(move |db| {
+            db.execute("VACUUM INTO ?1", params![target])?;
+            Ok(())
+        })
+        .await
+    }
+
     /// Забывает просроченное одного рода, одной транзакцией.
     ///
     /// По одному роду за вызов, а не всё разом: уборка держит единственное

@@ -1,0 +1,53 @@
+# Сборка бандла на тег (docs/adr/0028-bundle-and-systemd.md).
+#
+# Тег v<версия> обязан совпадать с версией в Cargo.toml: иначе на сервере
+# `autosre --version` скажет одно, а имя тарбола — другое. Бинарь статический,
+# под musl: на сервере не нужно ничего, кроме systemd.
+
+name: Бандл
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: Собрать и приложить к Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Сверить тег с версией в Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "${GITHUB_REF_NAME}" \
+            || { echo "тег ${GITHUB_REF_NAME} не совпадает с версией $version"; exit 1; }
+
+      - name: Поставить компилятор и цель musl
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+          rustup toolchain install 1.97 --profile minimal
+          rustup default 1.97
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Собрать статический бинарь
+        run: cargo build --release --target x86_64-unknown-linux-musl --bin autosre
+
+      - name: Проверить, что бинарь ни от чего не зависит
+        run: |
+          file target/x86_64-unknown-linux-musl/release/autosre
+          target/x86_64-unknown-linux-musl/release/autosre --version
+
+      - name: Упаковать
+        run: bundle/pack.sh target/x86_64-unknown-linux-musl/release/autosre "${GITHUB_REF_NAME#v}"
+
+      - name: Приложить к Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+          generate_release_notes: true
