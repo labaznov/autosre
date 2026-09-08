@@ -20,6 +20,7 @@ struct Agent {
     address: SocketAddr,
     shared: Shared,
     store: Store,
+    metrics: Arc<Metrics>,
     knowledge: autosre_app::config::Knowledge,
     _directory: TempDir,
 }
@@ -38,8 +39,9 @@ impl Agent {
         let knowledge = autosre_app::config::Knowledge::default()
             .shelf(directory.path().join("notes"), Duration::from_mins(5))
             .drafting(directory.path().join("drafts"));
+        let metrics = Arc::new(Metrics::new("0.1.0-тест"));
         let shared = Shared::new(
-            Arc::new(Metrics::new("0.1.0-тест")),
+            Arc::clone(&metrics),
             store.clone(),
             doorman,
             &knowledge,
@@ -57,6 +59,7 @@ impl Agent {
             address,
             shared,
             store,
+            metrics,
             knowledge,
             _directory: directory,
         }
@@ -211,6 +214,44 @@ async fn answers_the_health_check() {
     let agent = Agent::start().await;
     let health: serde_json::Value = agent.get("/api/health").await.json().await.unwrap();
     assert_eq!(health["status"], "ok");
+}
+
+#[tokio::test]
+async fn is_healthy_while_the_series_is_fresh() {
+    let agent = Agent::start().await;
+    agent
+        .metrics
+        .bucket(SystemTime::now() - Duration::from_mins(2));
+    assert_eq!(agent.get("/api/health").await.status(), 200);
+}
+
+#[tokio::test]
+async fn complains_when_the_series_fell_behind() {
+    let agent = Agent::start().await;
+    agent
+        .metrics
+        .bucket(SystemTime::now() - Duration::from_hours(1));
+    assert_eq!(agent.get("/api/health").await.status(), 503);
+}
+
+#[tokio::test]
+async fn names_the_trouble_in_the_health_check() {
+    let agent = Agent::start().await;
+    agent
+        .metrics
+        .bucket(SystemTime::now() - Duration::from_hours(1));
+    let health: serde_json::Value = agent.get("/api/health").await.json().await.unwrap();
+    assert_eq!(health["status"], "stale");
+}
+
+#[tokio::test]
+async fn tells_when_the_last_bucket_was_taken() {
+    let agent = Agent::start().await;
+    agent
+        .metrics
+        .bucket(SystemTime::UNIX_EPOCH + Duration::from_mins(29_782_811));
+    let health: serde_json::Value = agent.get("/api/health").await.json().await.unwrap();
+    assert_eq!(health["last_bucket"], 1_786_968_660);
 }
 
 #[tokio::test]

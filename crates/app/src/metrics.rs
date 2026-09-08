@@ -7,7 +7,7 @@
 
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Показатели агента, доступные снаружи.
 #[derive(Debug)]
@@ -154,6 +154,23 @@ impl Metrics {
     /// Отмечает, что бакет снят.
     pub fn bucket(&self, at: SystemTime) {
         self.last_bucket.store(stamp(at), Ordering::Relaxed);
+    }
+
+    /// Момент последнего снятого бакета, если снимали хоть раз.
+    #[must_use]
+    pub fn last(&self) -> Option<u64> {
+        Some(self.last_bucket.load(Ordering::Relaxed)).filter(|it| *it > 0)
+    }
+
+    /// Ослеп ли агент: бакетов не было дольше допуска.
+    ///
+    /// Пока ни одного бакета не снято, отсчёт идёт от старта: агент, который
+    /// за десять минут после подъёма не увидел ни минуты, так же слеп, как и
+    /// переставший видеть.
+    #[must_use]
+    pub fn stale(&self, now: SystemTime, allowance: Duration) -> bool {
+        let since = self.last().unwrap_or(self.started);
+        stamp(now).saturating_sub(since) > allowance.as_secs()
     }
 
     /// Отмечает найденные отклонения.
@@ -356,7 +373,7 @@ impl Metrics {
         );
         let _ = writeln!(
             out,
-            "# HELP autosre_build_info Версия агента\n# TYPE autosre_build_info gauge\nsre_build_info{{version=\"{}\"}} 1",
+            "# HELP autosre_build_info Версия агента\n# TYPE autosre_build_info gauge\nautosre_build_info{{version=\"{}\"}} 1",
             self.version
         );
         let last = self.last_bucket.load(Ordering::Relaxed);

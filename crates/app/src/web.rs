@@ -5,6 +5,7 @@
 //! ([ADR-0020](../../../docs/adr/0020-login-and-password.md)).
 
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use askama::Template;
 use autosre_domain::Minute;
@@ -836,12 +837,25 @@ async fn style() -> Response {
     ([("content-type", "text/css; charset=utf-8")], STYLE).into_response()
 }
 
+/// Сколько агент может не видеть ни одного бакета, прежде чем назваться слепым.
+///
+/// Съём идёт раз в минуту с повторами; десять минут без единого бакета — это
+/// не заминка, а либо лежащий источник, либо умерший цикл. И то и другое
+/// снаружи должно выглядеть нездоровьем, а не «ok» с версией.
+const BLIND_AFTER: Duration = Duration::from_mins(10);
+
 async fn health(State(shared): State<Shared>) -> Response {
-    Json(serde_json::json!({
-        "status": "ok",
+    let stale = shared.metrics.stale(SystemTime::now(), BLIND_AFTER);
+    let body = Json(serde_json::json!({
+        "status": if stale { "stale" } else { "ok" },
         "version": shared.version,
-    }))
-    .into_response()
+        "last_bucket": shared.metrics.last(),
+    }));
+    if stale {
+        (StatusCode::SERVICE_UNAVAILABLE, body).into_response()
+    } else {
+        body.into_response()
+    }
 }
 
 async fn expose(State(shared): State<Shared>) -> Response {

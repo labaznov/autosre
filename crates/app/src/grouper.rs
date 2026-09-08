@@ -32,9 +32,21 @@ pub fn group(
         .iter()
         .map(|source| (source.name().to_owned(), Arc::clone(source)))
         .collect();
-    let store = store.clone();
     let metrics = Arc::clone(metrics);
     let model = Arc::clone(model);
+    // Закрытие тишиной — свой цикл: отсев ходит в модель, и пока модель
+    // лежит, один его круг длится часами. Затихшие инциденты за это время
+    // должны закрываться, а не ждать.
+    let hushing = (store.clone(), settings.clone());
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_mins(1));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            quiet(&hushing.0, &hushing.1).await;
+        }
+    });
+    let store = store.clone();
     let settings = settings.clone();
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_mins(1));
@@ -42,7 +54,6 @@ pub fn group(
         loop {
             ticker.tick().await;
             sort(&sources, &store, &metrics, &model, &settings).await;
-            quiet(&store, &settings).await;
         }
     });
 }

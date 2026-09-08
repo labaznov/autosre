@@ -548,7 +548,7 @@ async fn collect(
     let span = window(incident, &seen.horizon, digger.incidents.sample_window);
     let edges = autosre_skills::Window {
         start: stamp(span.from().start()),
-        end: stamp(span.to().end()),
+        end: stamp(span.to().start()),
         before: stamp(
             span.from()
                 .back(i64::try_from(span.len()).unwrap_or(15))
@@ -601,7 +601,7 @@ fn stamp(at: chrono::DateTime<Utc>) -> String {
     at.format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// Окно горизонта, кончающееся последним подтверждением.
+/// Окно горизонта, кончающееся последним подтверждением включительно.
 ///
 /// Ширина берётся из горизонта: суточный скилл спрашивает про сутки, а не про
 /// пятнадцать минут вокруг последнего отклонения. Горизонт, записанный
@@ -609,8 +609,12 @@ fn stamp(at: chrono::DateTime<Utc>) -> String {
 fn window(incident: &Incident, horizon: &str, fallback: Duration) -> Span {
     let width = humantime::parse_duration(horizon).unwrap_or(fallback);
     let minutes = i64::try_from(width.as_secs() / 60).unwrap_or(15).max(1);
-    Span::new(incident.last.back(minutes - 1), incident.last, minutes)
-        .unwrap_or_else(|_| Span::single(incident.last))
+    Span::new(
+        incident.last.back(minutes - 1),
+        incident.last.next(),
+        minutes,
+    )
+    .unwrap_or_else(|_| Span::single(incident.last))
 }
 
 /// Похожие случаи из базы знаний.

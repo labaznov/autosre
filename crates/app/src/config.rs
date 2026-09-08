@@ -94,7 +94,7 @@ pub struct File {
     #[serde(default, rename = "horizon")]
     pub horizons: Vec<Horizon>,
     #[serde(default)]
-    pub collector: Collector,
+    pub collector: Collecting,
     /// Учётные записи веб-морды.
     #[serde(default, rename = "account")]
     pub accounts: Vec<Account>,
@@ -187,7 +187,7 @@ pub struct Horizon {
 
 /// Съём наблюдений.
 #[derive(Debug, Deserialize)]
-pub struct Collector {
+pub struct Collecting {
     /// Насколько глубоко закрывать дыры при старте.
     #[serde(default = "default_backfill", with = "humantime_serde")]
     pub backfill: Duration,
@@ -473,7 +473,7 @@ fn collect(section: &str, rest: &BTreeMap<String, toml::Value>, found: &mut Vec<
     }
 }
 
-impl Default for Collector {
+impl Default for Collecting {
     fn default() -> Self {
         Self {
             backfill: default_backfill(),

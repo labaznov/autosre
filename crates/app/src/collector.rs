@@ -14,28 +14,82 @@ use autosre_source::Source;
 use autosre_store::{Stale, Store};
 use chrono::Utc;
 
-use crate::config::{Collector, Retention};
+use crate::config::{Collecting, Retention};
 use crate::metrics::Metrics;
+
+/// Каждый сколький круг съёма закрывает дыры.
+///
+/// Не каждый: когда источник лежит, дозапрос — это столько же напрасных
+/// обращений, сколько дыр в глубине. Раз в пять минут их немного, а слепота
+/// после часа простоя кончается через пять минут, а не после перезапуска.
+pub const HEAL_EVERY: u64 = 5;
+
+/// Съём одного источника: минута за минутой и дозапрос дыр.
+#[derive(Clone)]
+pub struct Collector {
+    source: Arc<dyn Source>,
+    store: Store,
+    metrics: Arc<Metrics>,
+    /// Насколько глубоко закрывать дыры.
+    depth: Duration,
+    /// Сколько минут просить у источника за один запрос.
+    chunk: Duration,
+}
+
+impl Collector {
+    #[must_use]
+    pub fn new(
+        source: Arc<dyn Source>,
+        store: &Store,
+        metrics: &Arc<Metrics>,
+        depth: Duration,
+        chunk: Duration,
+    ) -> Self {
+        Self {
+            source,
+            store: store.clone(),
+            metrics: Arc::clone(metrics),
+            depth,
+            chunk,
+        }
+    }
+
+    /// Один круг: дозапрос дыр, если его черёд, и съём последней закрытой минуты.
+    ///
+    /// Нулевой круг — старт: дыры от простоя закрываются до первой минуты.
+    pub async fn round(&self, tick: u64) {
+        if tick.is_multiple_of(HEAL_EVERY) {
+            heal(
+                self.source.as_ref(),
+                &self.store,
+                &self.metrics,
+                self.depth,
+                self.chunk,
+            )
+            .await;
+        }
+        minute(self.source.as_ref(), &self.store, &self.metrics).await;
+    }
+}
 
 /// Заводит съём наблюдений по всем источникам.
 pub fn collect(
     sources: Vec<Arc<dyn Source>>,
     store: &Store,
     metrics: &Arc<Metrics>,
-    settings: &Collector,
+    settings: &Collecting,
     depth: Duration,
 ) {
     for source in sources {
-        let store = store.clone();
-        let metrics = Arc::clone(metrics);
-        let chunk = settings.chunk;
+        let collector = Collector::new(source, store, metrics, depth, settings.chunk);
         tokio::spawn(async move {
-            heal(source.as_ref(), &store, &metrics, depth, chunk).await;
             let mut ticker = tokio::time::interval(Duration::from_mins(1));
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut tick = 0;
             loop {
                 ticker.tick().await;
-                minute(source.as_ref(), &store, &metrics).await;
+                collector.round(tick).await;
+                tick += 1;
             }
         });
     }
