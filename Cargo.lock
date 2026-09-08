@@ -116,6 +116,7 @@ dependencies = [
  "base64",
  "chrono",
  "hmac",
+ "humantime",
  "humantime-serde",
  "reqwest",
  "serde",

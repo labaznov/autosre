@@ -153,16 +153,46 @@ fn fills_the_window_into_a_query() {
         "_time:[{start}, {end}) {stream}",
         &wifi(),
         "orders-api",
-        "2026-08-17T10:00:00Z",
-        "2026-08-17T10:15:00Z",
+        &window(),
     );
     assert!(filled.starts_with("_time:[2026-08-17T10:00:00Z, 2026-08-17T10:15:00Z)"));
 }
 
 #[test]
+fn fills_the_window_before_this_one() {
+    let filled = autosre_skills::fill("_time:[{before}, {start})", &wifi(), "a", &window());
+    assert_eq!(filled, "_time:[2026-08-17T09:45:00Z, 2026-08-17T10:00:00Z)");
+}
+
+#[test]
+fn fills_the_series_name_of_a_metric() {
+    let deviation = deviation("metrics", "15m", "{__series__=\"node_load1\",job=\"a\"}");
+    assert_eq!(
+        autosre_skills::fill("{metric}{job=\"x\"}", &deviation, "a", &window()),
+        "node_load1{job=\"x\"}"
+    );
+}
+
+#[test]
+fn leaves_the_series_name_empty_for_logs() {
+    assert_eq!(
+        autosre_skills::fill("{metric}", &wifi(), "a", &window()),
+        ""
+    );
+}
+
+fn window() -> autosre_skills::Window {
+    autosre_skills::Window {
+        start: "2026-08-17T10:00:00Z".to_owned(),
+        end: "2026-08-17T10:15:00Z".to_owned(),
+        before: "2026-08-17T09:45:00Z".to_owned(),
+    }
+}
+
+#[test]
 fn keeps_a_stray_pipe_out_of_a_query() {
     let deviation = deviation("logs", "15m", "{service=\"a|drop\"}");
-    let filled = autosre_skills::fill("{stream}", &deviation, "a", "x", "y");
+    let filled = autosre_skills::fill("{stream}", &deviation, "a", &window());
     assert!(!filled.contains('|'));
 }
 

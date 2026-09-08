@@ -277,3 +277,74 @@ async fn calls_itself_logs() {
     let fake = Fake::start(StatusCode::OK, COUNTS).await;
     assert_eq!(fake.logs(Duration::from_secs(5), "").name(), "logs");
 }
+
+const BY_HOUR: &str = concat!(
+    r#"{"_time":"2026-08-17T09:00:00Z","total":"12"}"#,
+    "\n",
+    r#"{"_time":"2026-08-17T10:00:00Z","total":"40"}"#,
+    "\n",
+);
+
+#[tokio::test]
+async fn runs_a_query_as_written() {
+    let fake = Fake::start(StatusCode::OK, BY_HOUR).await;
+    fake.logs(Duration::from_secs(5), "")
+        .query(
+            "_time:1h {a=\"b\"} | stats by (_time:1h) count() as total",
+            quarter(),
+            50,
+        )
+        .await
+        .expect("запрос не прошёл");
+    assert_eq!(
+        fake.seen()[0].query,
+        "_time:1h {a=\"b\"} | stats by (_time:1h) count() as total"
+    );
+}
+
+#[tokio::test]
+async fn passes_the_limit_of_a_query() {
+    let fake = Fake::start(StatusCode::OK, BY_HOUR).await;
+    fake.logs(Duration::from_secs(5), "")
+        .query("*", quarter(), 37)
+        .await
+        .expect("запрос не прошёл");
+    assert_eq!(fake.seen()[0].limit, "37");
+}
+
+#[tokio::test]
+async fn renders_a_stats_row_as_fields() {
+    let fake = Fake::start(StatusCode::OK, BY_HOUR).await;
+    let lines = fake
+        .logs(Duration::from_secs(5), "")
+        .query("*", quarter(), 50)
+        .await
+        .expect("запрос не прошёл");
+    assert_eq!(lines[1], "_time=2026-08-17T10:00:00Z total=40");
+}
+
+#[tokio::test]
+async fn renders_a_message_row_as_the_message_alone() {
+    let fake = Fake::start(
+        StatusCode::OK,
+        r#"{"_stream":"{a=\"b\"}","_stream_id":"0x1","_time":"2026-08-17T10:00:00Z","_msg":"upstream timed out"}"#,
+    )
+    .await;
+    let lines = fake
+        .logs(Duration::from_secs(5), "")
+        .query("*", quarter(), 50)
+        .await
+        .expect("запрос не прошёл");
+    assert_eq!(lines, vec!["upstream timed out".to_owned()]);
+}
+
+#[tokio::test]
+async fn reports_a_refused_query() {
+    let fake = Fake::start(StatusCode::BAD_REQUEST, "cannot parse query").await;
+    let failure = fake
+        .logs(Duration::from_secs(5), "")
+        .query("| |", quarter(), 50)
+        .await
+        .expect_err("отказ пропущен");
+    assert!(matches!(failure, SourceError::Status { status: 400, .. }));
+}

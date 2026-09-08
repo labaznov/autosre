@@ -23,6 +23,16 @@ const NAME: &str = "metrics";
 /// Путь выборки диапазона в API `VictoriaMetrics`.
 const ENDPOINT: &str = "api/v1/query_range";
 
+/// Путь мгновенного запроса: так исполняются запросы скиллов.
+const INSTANT: &str = "api/v1/query";
+
+/// Метка, под которой имя серии лежит в селекторе потока.
+///
+/// Своя, а не `__name__`: селектор потока агент собирает сам, и в нём имя
+/// серии — такая же метка, как остальные. В запрос к источнику она переводится
+/// обратно.
+const SERIES: &str = "__series__";
+
 /// Настройки соединения.
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -39,6 +49,7 @@ pub struct Settings {
 pub struct Metrics {
     http: reqwest::Client,
     endpoint: Url,
+    instant: Url,
     select: Vec<String>,
     labels: Vec<String>,
 }
@@ -58,6 +69,10 @@ impl Metrics {
             endpoint: settings
                 .url
                 .join(ENDPOINT)
+                .map_err(|cause| transport(&cause))?,
+            instant: settings
+                .url
+                .join(INSTANT)
                 .map_err(|cause| transport(&cause))?,
             select: settings.select.clone(),
             labels: settings.labels.clone(),
@@ -120,6 +135,100 @@ impl Source for Metrics {
         );
         Ok(all)
     }
+
+    /// Запрос исполняется мгновенным на конец промежутка: отрезок автор
+    /// скилла задаёт сам, диапазоном внутри запроса — `[7d]`, `[1h]`.
+    async fn query(
+        &self,
+        text: &str,
+        span: Span,
+        limit: usize,
+    ) -> Result<Vec<String>, SourceError> {
+        let query = text.replace(&format!("{SERIES}="), "__name__=");
+        tracing::debug!(query, "запрос скилла к метрикам");
+        let response = self
+            .http
+            .get(self.instant.clone())
+            .query(&[
+                ("query", query.as_str()),
+                ("time", &span.to().stamp().to_string()),
+            ])
+            .send()
+            .await
+            .map_err(|cause| transport(&cause))?;
+        let status = response.status();
+        let body = response.text().await.map_err(|cause| transport(&cause))?;
+        if !status.is_success() {
+            return Err(SourceError::Status {
+                status: status.as_u16(),
+                body: clip(&body),
+            });
+        }
+        let mut lines = lines(&body)?;
+        lines.truncate(limit);
+        Ok(lines)
+    }
+}
+
+/// Ответ мгновенного запроса строками: селектор и значение, у отрезка — по
+/// строке на точку.
+fn lines(body: &str) -> Result<Vec<String>, SourceError> {
+    let answer: Value =
+        serde_json::from_str(body).map_err(|cause| SourceError::Shape(cause.to_string()))?;
+    let data = &answer["data"];
+    if data["resultType"] == "scalar" || data["resultType"] == "string" {
+        return Ok(vec![point(&data["result"], "")]);
+    }
+    let rows = data["result"]
+        .as_array()
+        .ok_or_else(|| SourceError::Shape(clip(body)))?;
+    let mut lines = Vec::new();
+    for row in rows {
+        let labels = selector(&row["metric"]);
+        if let Some(points) = row["values"].as_array() {
+            for pair in points {
+                lines.push(point(pair, &labels));
+            }
+        } else {
+            lines.push(format!("{labels} {}", reading_text(&row["value"][1])));
+        }
+    }
+    Ok(lines)
+}
+
+/// Точка «время, значение» одной строкой.
+fn point(pair: &Value, labels: &str) -> String {
+    let at = pair[0]
+        .as_f64()
+        .map(|it| format!("{it:.0}"))
+        .unwrap_or_default();
+    let value = reading_text(&pair[1]);
+    if labels.is_empty() {
+        format!("{at} {value}")
+    } else {
+        format!("{labels} {at} {value}")
+    }
+}
+
+/// Значение как текст: строкой оно и приходит.
+fn reading_text(value: &Value) -> String {
+    value
+        .as_str()
+        .map_or_else(|| value.to_string(), ToOwned::to_owned)
+}
+
+/// Селектор из меток ответа, в порядке имён.
+fn selector(labels: &Value) -> String {
+    let inside = labels
+        .as_object()
+        .map(|map| {
+            map.iter()
+                .filter_map(|(key, value)| value.as_str().map(|it| format!("{key}=\"{it}\"")))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    format!("{{{inside}}}")
 }
 
 /// Разбирает ответ `query_range`.
@@ -167,7 +276,7 @@ fn name(series: &str, labels: &Value) -> Stream {
             }
         }
     }
-    pairs.insert("__series__".to_owned(), series.to_owned());
+    pairs.insert(SERIES.to_owned(), series.to_owned());
     let inside = pairs
         .iter()
         .map(|(key, value)| format!("{key}=\"{value}\""))

@@ -6,11 +6,10 @@ when:
   signal: metric
 collect:
   - id: neighbours
-    vm: '{__series__}{job="{service}"}'
+    vm: '{metric}{job="{service}"}'
   - id: errors
     vl: '_time:[{start}, {end}) {stream} (i(error*) OR i(warn*)) | fields _msg'
     limit: 50
-tools: [metrics, logs]
 ---
 
 Показатель ушёл от своего обычного уровня. Важно не само число, а куда и

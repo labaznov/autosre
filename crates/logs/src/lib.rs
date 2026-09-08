@@ -105,6 +105,16 @@ impl Source for Logs {
             .map(ToOwned::to_owned)
             .collect())
     }
+
+    async fn query(
+        &self,
+        text: &str,
+        _span: Span,
+        limit: usize,
+    ) -> Result<Vec<String>, SourceError> {
+        let body = self.ask(text, limit).await?;
+        Ok(rows(&body)?.iter().map(line).collect())
+    }
 }
 
 impl Logs {
@@ -142,6 +152,28 @@ fn rows(body: &str) -> Result<Vec<Map<String, Value>>, SourceError> {
             _ => Err(SourceError::Shape(clip(line))),
         })
         .collect()
+}
+
+/// Запись ответа одной строкой для модели.
+///
+/// Живая запись — это её текст, остальное в ней служебное. Результат `stats` —
+/// поля и числа, и там важны все. Различаются они по составу полей, а не по
+/// запросу: агент запроса не понимает.
+fn line(row: &Map<String, Value>) -> String {
+    const OWN: &[&str] = &["_msg", "_stream", "_stream_id", "_time"];
+    if let Some(message) = row.get("_msg").and_then(Value::as_str)
+        && row.keys().all(|key| OWN.contains(&key.as_str()))
+    {
+        return message.to_owned();
+    }
+    row.iter()
+        .filter(|(key, _)| *key != "_stream_id")
+        .map(|(key, value)| match value {
+            Value::String(text) => format!("{key}={text}"),
+            other => format!("{key}={other}"),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn bucket(row: &Map<String, Value>) -> Result<Bucket, SourceError> {

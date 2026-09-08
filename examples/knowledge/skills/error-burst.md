@@ -9,9 +9,8 @@ collect:
     vl: '_time:[{start}, {end}) {stream} (i(error*) OR i(exception*) OR i(panic*) OR i(fatal*)) | fields _msg'
     limit: 200
   - id: before
-    vl: '_time:[{start}-{horizon}, {start}) {stream} (i(error*) OR i(exception*) OR i(panic*) OR i(fatal*)) | fields _msg'
+    vl: '_time:[{before}, {start}) {stream} (i(error*) OR i(exception*) OR i(panic*) OR i(fatal*)) | fields _msg'
     limit: 100
-tools: [logs, knowledge]
 ---
 
 Сравни сигнатуры ошибок окна с тем, что было в предыдущем окне.

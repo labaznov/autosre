@@ -527,6 +527,13 @@ fn head(incident: &Incident) -> String {
 }
 
 /// Первое досье: то, что велел собрать скилл.
+///
+/// Запрос скилла исполняется как написан, с подстановками окна и потока
+/// ([ADR-0005](../../../docs/adr/0005-native-queries.md)). Пункт без запроса
+/// даёт живые строки потока: этого хватает, чтобы скилл заработал без единой
+/// строки на языке источника. Отказ одного запроса ложится в досье словами и
+/// остальных не срывает: модели полезнее знать, чего не собрали, чем не
+/// получить ничего.
 async fn collect(
     digger: &Digger,
     incident: &Incident,
@@ -534,23 +541,42 @@ async fn collect(
     investigation: i64,
 ) -> Vec<(String, String)> {
     let mut parts = Vec::new();
-    let window = i64::try_from(digger.incidents.sample_window.as_secs() / 60).unwrap_or(15);
-    let span = Span::new(incident.last.back(window), incident.last, window + 1)
-        .unwrap_or_else(|_| Span::single(incident.last));
+    let seen = about(incident);
+    let span = window(incident, &seen.horizon, digger.incidents.sample_window);
+    let edges = autosre_skills::Window {
+        start: stamp(span.from().start()),
+        end: stamp(span.to().end()),
+        before: stamp(
+            span.from()
+                .back(i64::try_from(span.len()).unwrap_or(15))
+                .start(),
+        ),
+    };
     for (ord, want) in skill.front.collect.iter().enumerate() {
-        let Some(source) = digger.source(if want.vl.is_some() { "logs" } else { "metrics" }) else {
-            continue;
+        let limit = want.limit.unwrap_or(digger.incidents.samples);
+        let asked = match (&want.vl, &want.vm) {
+            (Some(text), _) => Some(("logs", text)),
+            (None, Some(text)) => Some(("metrics", text)),
+            (None, None) => None,
         };
-        let text = match source
-            .samples(
-                &incident.stream,
-                span,
-                want.limit.unwrap_or(digger.incidents.samples),
-            )
-            .await
-        {
-            Ok(lines) => join(&lines),
-            Err(failure) => format!("не собрано: {failure}"),
+        let text = match asked {
+            Some((name, text)) => {
+                let query = autosre_skills::fill(text, &seen, incident.service.as_str(), &edges);
+                match digger.source(name) {
+                    Some(source) => match source.query(&query, span, limit).await {
+                        Ok(lines) => plain(&lines),
+                        Err(failure) => format!("не собрано: {failure}"),
+                    },
+                    None => format!("не собрано: источника «{name}» нет"),
+                }
+            }
+            None => match digger.source(&incident.source) {
+                Some(source) => match source.samples(&incident.stream, span, limit).await {
+                    Ok(lines) => join(&lines),
+                    Err(failure) => format!("не собрано: {failure}"),
+                },
+                None => format!("не собрано: источника «{}» нет", incident.source),
+            },
         };
         let _ = digger
             .store
@@ -565,6 +591,23 @@ async fn collect(
         parts.push(part);
     }
     parts
+}
+
+/// Момент в форме, которую понимают оба источника.
+fn stamp(at: chrono::DateTime<Utc>) -> String {
+    at.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// Окно горизонта, кончающееся последним подтверждением.
+///
+/// Ширина берётся из горизонта: суточный скилл спрашивает про сутки, а не про
+/// пятнадцать минут вокруг последнего отклонения. Горизонт, записанный
+/// непонятно, даёт окно выборки из настроек.
+fn window(incident: &Incident, horizon: &str, fallback: Duration) -> Span {
+    let width = humantime::parse_duration(horizon).unwrap_or(fallback);
+    let minutes = i64::try_from(width.as_secs() / 60).unwrap_or(15).max(1);
+    Span::new(incident.last.back(minutes - 1), incident.last, minutes)
+        .unwrap_or_else(|_| Span::single(incident.last))
 }
 
 /// Похожие случаи из базы знаний.
@@ -722,6 +765,15 @@ pub async fn resume(digger: &Digger) {
 }
 
 /// Строки в текст, схлопнутые по сигнатурам.
+/// Результат запроса как есть: в строках `stats` числа и есть ответ, и
+/// сворачивать их в сигнатуры значит стереть то, ради чего запрос писали.
+fn plain(lines: &[String]) -> String {
+    if lines.is_empty() {
+        return "(пусто)".to_owned();
+    }
+    lines.join("\n")
+}
+
 fn join(lines: &[String]) -> String {
     if lines.is_empty() {
         return "(пусто)".to_owned();

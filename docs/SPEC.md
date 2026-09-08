@@ -209,7 +209,6 @@ collect:
     limit: 100
   - id: rps
     vm: 'sum(rate(http_requests_total{job="{service}"}[{horizon}]))'
-tools: [logs, metrics, knowledge]
 ---
 
 Сопоставь рост ошибок с нагрузкой на сервис.

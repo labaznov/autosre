@@ -13,7 +13,6 @@ collect:
   - id: errors
     vl: '_time:[{start}, {end}) {stream} (i(error*) OR i(warn*)) | fields _msg'
     limit: 50
-tools: [metrics, logs, knowledge]
 ---
 
 Здесь важна не величина, а направление и скорость.

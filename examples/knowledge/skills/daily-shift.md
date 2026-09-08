@@ -12,7 +12,6 @@ collect:
     vl: '_time:[{start}, {end}) {stream} (i(error*) OR i(exception*)) | stats by (_time:1h) count() as total'
   - id: week
     vm: 'avg_over_time({stream}[7d])'
-tools: [logs, metrics, knowledge]
 steps: 2
 ---
 

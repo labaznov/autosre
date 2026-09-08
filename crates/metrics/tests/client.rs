@@ -33,6 +33,7 @@ impl Fake {
         let address = listener.local_addr().expect("адрес не получен");
         let router = Router::new()
             .route("/api/v1/query_range", get(answer))
+            .route("/api/v1/query", get(instant))
             .with_state(Reply {
                 seen: Arc::clone(&seen),
                 status,
@@ -70,6 +71,23 @@ async fn answer(
         .lock()
         .expect("журнал заблокирован")
         .push(params.get("query").cloned().unwrap_or_default());
+    (reply.status, reply.body.to_owned())
+}
+
+/// Мгновенный запрос запоминается вместе с моментом: `запрос@время`.
+async fn instant(
+    State(reply): State<Reply>,
+    Query(params): Query<HashMap<String, String>>,
+) -> (StatusCode, String) {
+    reply
+        .seen
+        .lock()
+        .expect("журнал заблокирован")
+        .push(format!(
+            "{}@{}",
+            params.get("query").cloned().unwrap_or_default(),
+            params.get("time").cloned().unwrap_or_default()
+        ));
     (reply.status, reply.body.to_owned())
 }
 
@@ -209,4 +227,74 @@ async fn has_no_samples_to_give() {
 async fn calls_itself_metrics() {
     let fake = Fake::start(StatusCode::OK, MEMORY).await;
     assert_eq!(fake.metrics(&["x_bytes"]).name(), "metrics");
+}
+
+const WEEK: &str = r#"{"status":"success","data":{"resultType":"vector","result":[
+ {"metric":{"__name__":"process_resident_memory_bytes","job":"llama-server"},"value":[1786968900,"457000000"]}
+]}}"#;
+
+#[tokio::test]
+async fn runs_a_query_at_the_end_of_the_span() {
+    let fake = Fake::start(StatusCode::OK, WEEK).await;
+    fake.metrics(&[])
+        .query("avg_over_time(x[7d])", quarter(), 50)
+        .await
+        .expect("запрос не прошёл");
+    assert_eq!(
+        fake.seen(),
+        vec!["avg_over_time(x[7d])@1786968900".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn renders_a_vector_as_labels_and_value() {
+    let fake = Fake::start(StatusCode::OK, WEEK).await;
+    let lines = fake
+        .metrics(&[])
+        .query("x", quarter(), 50)
+        .await
+        .expect("запрос не прошёл");
+    assert_eq!(
+        lines,
+        vec![
+            "{__name__=\"process_resident_memory_bytes\",job=\"llama-server\"} 457000000"
+                .to_owned()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn renders_a_matrix_as_one_line_per_point() {
+    let fake = Fake::start(StatusCode::OK, MEMORY).await;
+    let lines = fake
+        .metrics(&[])
+        .query("x[1h]", quarter(), 50)
+        .await
+        .expect("запрос не прошёл");
+    assert_eq!(lines[1], "{job=\"llama-server\"} 1786968120 458000000");
+}
+
+#[tokio::test]
+async fn speaks_prometheus_for_the_series_label() {
+    let fake = Fake::start(StatusCode::OK, WEEK).await;
+    fake.metrics(&[])
+        .query(
+            "avg_over_time({__series__=\"x\",job=\"a\"}[7d])",
+            quarter(),
+            50,
+        )
+        .await
+        .expect("запрос не прошёл");
+    assert!(fake.seen()[0].starts_with("avg_over_time({__name__=\"x\",job=\"a\"}[7d])"));
+}
+
+#[tokio::test]
+async fn cuts_a_query_result_to_the_limit() {
+    let fake = Fake::start(StatusCode::OK, MEMORY).await;
+    let lines = fake
+        .metrics(&[])
+        .query("x[1h]", quarter(), 1)
+        .await
+        .expect("запрос не прошёл");
+    assert_eq!(lines.len(), 1);
 }

@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -33,8 +33,24 @@ collect:
 Сравни сигнатуры окна с прошлым.
 ";
 
-/// Источник, который всегда отдаёт одни и те же строки.
-struct Talker;
+/// Скилл без запроса: досье собирается из живых строк потока.
+const BARE: &str = r"---
+name: bare
+title: Без запроса
+horizon: 15m
+when:
+  signal: errors
+collect:
+  - id: lines
+---
+
+Смотри на строки.
+";
+
+/// Источник, который всегда отдаёт одни и те же строки и помнит, что его
+/// спрашивали.
+#[derive(Clone, Default)]
+struct Talker(Arc<Mutex<Vec<String>>>);
 
 #[async_trait]
 impl Source for Talker {
@@ -56,6 +72,19 @@ impl Source for Talker {
             "upstream 192.0.2.19 timed out after 30s".to_owned(),
             "upstream 192.0.2.22 timed out after 45s".to_owned(),
         ])
+    }
+
+    async fn query(
+        &self,
+        text: &str,
+        _span: Span,
+        _limit: usize,
+    ) -> Result<Vec<String>, SourceError> {
+        self.0
+            .lock()
+            .expect("журнал заблокирован")
+            .push(text.to_owned());
+        Ok(vec!["_time=2026-08-17T10:00:00Z total=40".to_owned()])
     }
 }
 
@@ -92,6 +121,7 @@ struct Stand {
     store: Store,
     digger: Digger,
     asked: Arc<AtomicUsize>,
+    talker: Talker,
     _skills: TempDir,
     _directory: TempDir,
 }
@@ -106,10 +136,21 @@ impl Stand {
 
     /// Стенд без очереди: для проверок, которым нужен покой.
     async fn still(patience: Duration) -> Self {
+        Self::with(patience, SKILL).await
+    }
+
+    /// Стенд с очередью и своим скиллом.
+    async fn skilled(skill: &str) -> Self {
+        let stand = Self::with(Duration::from_hours(1), skill).await;
+        dig(stand.digger.clone());
+        stand
+    }
+
+    async fn with(patience: Duration, skill: &str) -> Self {
         let directory = TempDir::new().expect("временный каталог не создан");
         let store = Store::open(&directory.path().join("autosre.db")).expect("база не открыта");
         let skills = TempDir::new().expect("каталог скиллов не создан");
-        std::fs::write(skills.path().join("error-burst.md"), SKILL).expect("скилл не записан");
+        std::fs::write(skills.path().join("skill.md"), skill).expect("скилл не записан");
 
         let (address, asked) = model().await;
         let model = Arc::new(
@@ -126,7 +167,8 @@ impl Stand {
             .expect("клиент не собрался"),
         );
 
-        let sources: Vec<Arc<dyn Source>> = vec![Arc::new(Talker)];
+        let talker = Talker::default();
+        let sources: Vec<Arc<dyn Source>> = vec![Arc::new(talker.clone())];
         let digger = Digger::new(
             &sources,
             &store,
@@ -144,6 +186,7 @@ impl Stand {
             store,
             digger,
             asked,
+            talker,
             _skills: skills,
             _directory: directory,
         }
@@ -229,6 +272,45 @@ async fn writes_every_step_as_it_goes() {
     let incident = stand.incident(1).await;
     let found = stand.wait(incident, "done").await.expect("вывода нет");
     assert_eq!(stand.store.steps(found.id).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn runs_the_skill_query_with_the_stream_filled_in() {
+    let stand = Stand::start(Duration::from_hours(1)).await;
+    let incident = stand.incident(1).await;
+    stand.wait(incident, "done").await.expect("вывода нет");
+    let asked = stand.talker.0.lock().unwrap().clone();
+    assert!(
+        asked[0].contains("{host=\"node-01\",service=\"orders-api\"}"),
+        "{asked:?}"
+    );
+}
+
+#[tokio::test]
+async fn fills_the_window_into_the_skill_query() {
+    let stand = Stand::start(Duration::from_hours(1)).await;
+    let incident = stand.incident(1).await;
+    stand.wait(incident, "done").await.expect("вывода нет");
+    let asked = stand.talker.0.lock().unwrap().clone();
+    assert!(asked[0].starts_with("_time:[20"), "{asked:?}");
+}
+
+#[tokio::test]
+async fn puts_the_query_result_into_the_dossier() {
+    let stand = Stand::start(Duration::from_hours(1)).await;
+    let incident = stand.incident(1).await;
+    let found = stand.wait(incident, "done").await.expect("вывода нет");
+    let steps = stand.store.steps(found.id).await.unwrap();
+    assert_eq!(steps[0].2, "_time=2026-08-17T10:00:00Z total=40");
+}
+
+#[tokio::test]
+async fn takes_live_lines_when_the_skill_has_no_query() {
+    let stand = Stand::skilled(BARE).await;
+    let incident = stand.incident(1).await;
+    let found = stand.wait(incident, "done").await.expect("вывода нет");
+    let steps = stand.store.steps(found.id).await.unwrap();
+    assert!(steps[0].2.contains("upstream 192.0.2.19"), "{steps:?}");
 }
 
 #[tokio::test]

@@ -65,8 +65,6 @@ pub struct Front {
     #[serde(default)]
     pub collect: Vec<Collect>,
     #[serde(default)]
-    pub tools: Option<Vec<String>>,
-    #[serde(default)]
     pub steps: Option<usize>,
     /// Поля, которых агент не знает: скилл новее его самого.
     #[serde(flatten)]
@@ -198,18 +196,41 @@ pub fn read(directory: &Path) -> Result<Vec<Skill>, SkillError> {
     Ok(skills)
 }
 
+/// Окно, подставляемое в запрос: границы в RFC 3339.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Window {
+    /// Начало окна горизонта.
+    pub start: String,
+    /// Конец окна горизонта.
+    pub end: String,
+    /// Начало такого же окна перед этим: для сравнения «до и во время».
+    pub before: String,
+}
+
 /// Подставляет в запрос данные отклонения.
 ///
 /// Единственный путь данным наблюдения попасть в запрос. Собирается в одном
 /// месте, чтобы кавычка в имени контейнера не превращалась в чужой запрос.
 #[must_use]
-pub fn fill(query: &str, deviation: &Deviation, service: &str, from: &str, to: &str) -> String {
+pub fn fill(query: &str, deviation: &Deviation, service: &str, window: &Window) -> String {
     query
-        .replace("{start}", from)
-        .replace("{end}", to)
+        .replace("{start}", &window.start)
+        .replace("{end}", &window.end)
+        .replace("{before}", &window.before)
         .replace("{horizon}", &deviation.horizon)
         .replace("{stream}", &safe(&deviation.stream))
+        .replace("{metric}", &safe(&Stream::new(series(&deviation.stream))))
         .replace("{service}", &safe(&Stream::new(service)))
+}
+
+/// Имя серии из селектора потока метрик; у логов его нет, и это пусто.
+fn series(stream: &Stream) -> String {
+    let text = stream.as_str();
+    let Some(start) = text.find("__series__=\"") else {
+        return String::new();
+    };
+    let rest = &text[start + "__series__=\"".len()..];
+    rest.split('"').next().unwrap_or_default().to_owned()
 }
 
 /// Убирает из значения то, чем можно закрыть строку и приписать своё.

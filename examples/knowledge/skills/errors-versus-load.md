@@ -13,7 +13,6 @@ collect:
     vm: 'sum(rate(http_requests_total{job="{service}"}[{horizon}]))'
   - id: latency
     vm: 'histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job="{service}"}[{horizon}])))'
-tools: [logs, metrics, knowledge]
 ---
 
 Сопоставь рост ошибок с нагрузкой на сервис.
